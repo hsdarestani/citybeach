@@ -1,0 +1,105 @@
+name: Apple-Serverprotokoll im PR
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH-Werkzeug installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Serveraktivierung protokollieren
+        id: remote
+        continue-on-error: true
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PRIVATE_KEY_INPUT: ${{ secrets.APPLE_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -o pipefail
+          case "$APPLE_PRIVATE_KEY_INPUT" in
+            *'BEGIN PRIVATE KEY'*) KEY_B64="$(printf '%s' "$APPLE_PRIVATE_KEY_INPUT" | base64 -w 0)" ;;
+            *) KEY_B64="$(printf '%s' "$APPLE_PRIVATE_KEY_INPUT" | tr -d '[:space:]')" ;;
+          esac
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" "APPLE_CLIENT_ID='$APPLE_CLIENT_ID' APPLE_KEY_ID='$APPLE_KEY_ID' APPLE_TEAM_ID='$APPLE_TEAM_ID' APPLE_REDIRECT_URI='https://citybeach.smarbiz.sbs/accounts/apple/login/callback/' APPLE_PRIVATE_KEY_BASE64='$KEY_B64' bash -s" <<'REMOTE' 2>&1 | tee /tmp/apple-remote.log
+          set -euo pipefail
+          echo 'STAGE_1_SSH_OK'
+          cd /root/citybeach
+          echo 'STAGE_2_APP_DIR_OK'
+          test -f .env
+          echo 'STAGE_3_ENV_FILE_FOUND'
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path('/root/citybeach/.env')
+          lines = path.read_text().splitlines()
+          updates = {
+              'APPLE_CLIENT_ID': os.environ['APPLE_CLIENT_ID'],
+              'APPLE_KEY_ID': os.environ['APPLE_KEY_ID'],
+              'APPLE_TEAM_ID': os.environ['APPLE_TEAM_ID'],
+              'APPLE_REDIRECT_URI': os.environ['APPLE_REDIRECT_URI'],
+              'APPLE_PRIVATE_KEY_BASE64': os.environ['APPLE_PRIVATE_KEY_BASE64'],
+          }
+          out, seen = [], set()
+          for line in lines:
+              key = line.split('=', 1)[0] if '=' in line else ''
+              if key in {'APPLE_SERVICE_ID', 'APPLE_PRIVATE_KEY_B64'}:
+                  continue
+              if key in updates:
+                  out.append(f'{key}={updates[key]}')
+                  seen.add(key)
+              else:
+                  out.append(line)
+          for key, value in updates.items():
+              if key not in seen:
+                  out.append(f'{key}={value}')
+          path.write_text('\n'.join(out) + '\n')
+          path.chmod(0o600)
+          PY
+          echo 'STAGE_4_ENV_WRITTEN'
+
+          docker compose up -d --build --remove-orphans
+          echo 'STAGE_5_DOCKER_UP'
+          docker compose ps
+          docker compose exec -T web python manage.py shell -c "from django.conf import settings; print('APPLE_LOGIN_ENABLED=', settings.APPLE_LOGIN_ENABLED); print('REDIRECT_OK=', settings.APPLE_REDIRECT_URI == 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'); print('KEY_LOADED=', 'BEGIN PRIVATE KEY' in settings.APPLE_PRIVATE_KEY); assert settings.APPLE_LOGIN_ENABLED"
+          echo 'STAGE_6_DJANGO_APPLE_OK'
+          REMOTE
+
+      - name: Protokoll im PR veröffentlichen
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OUTCOME: ${{ steps.remote.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.request
+          text = pathlib.Path('/tmp/apple-remote.log').read_text(errors='replace')[-10000:] if pathlib.Path('/tmp/apple-remote.log').exists() else 'Kein Serverprotokoll.'
+          body = f"### Apple-Serveraktivierung: {os.environ['OUTCOME']}\n\n```text\n{text}\n```"
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments",
+              data=json.dumps({'body': body}).encode(),
+              headers={'Authorization': f"Bearer {os.environ['GH_TOKEN']}", 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json'},
+              method='POST',
+          )
+          urllib.request.urlopen(req).read()
+          PY
+
+      - name: Ergebnis erzwingen
+        if: steps.remote.outcome == 'failure'
+        run: exit 1
