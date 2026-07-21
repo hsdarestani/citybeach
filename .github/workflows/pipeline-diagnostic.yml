@@ -1,0 +1,25 @@
+name: Pipeline-Schritte einzeln prüfen
+
+on:
+  pull_request:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_DEBUG: '1'
+      DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Migrationen vergleichen
+        run: python manage.py makemigrations --check --dry-run
+      - name: Migrationen anwenden
+        run: python manage.py migrate --noinput
+      - name: Tests ausführen
+        run: python manage.py test -v 1
+      - name: Statische Dateien sammeln
+        run: python manage.py collectstatic --noinput
