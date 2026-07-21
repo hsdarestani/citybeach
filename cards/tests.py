@@ -1,11 +1,15 @@
 from datetime import date
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
-from django.urls import reverse
+from django.test import RequestFactory, TestCase, override_settings
+from django.urls import resolve, reverse
 
+from .apple_views import CityBeachAppleOAuth2Adapter, apple_callback
 from .forms import RegistrationForm
 from .models import Business, CustomerProfile, Membership, Venue, Wallet
+
+
+APPLE_CALLBACK = 'https://citybeach.smarbiz.sbs/accounts/apple/callback/'
 
 
 class GermanInterfaceTests(TestCase):
@@ -24,6 +28,27 @@ class GermanInterfaceTests(TestCase):
         self.assertContains(response, 'ANGEBOTE & VERANSTALTUNGEN')
         self.assertNotContains(response, 'CHOOSE YOUR VIBE')
         self.assertNotContains(response, 'OFFERS & EVENTS')
+
+
+@override_settings(APPLE_REDIRECT_URI=APPLE_CALLBACK)
+class AppleCallbackConfigurationTests(TestCase):
+    def test_registered_callback_path_uses_citybeach_view(self):
+        match = resolve('/accounts/apple/callback/')
+        self.assertEqual(match.func, apple_callback)
+
+    def test_adapter_uses_exact_registered_callback(self):
+        request = RequestFactory().get(
+            '/accounts/apple/login/',
+            secure=True,
+            HTTP_HOST='citybeach.smarbiz.sbs',
+        )
+        adapter = CityBeachAppleOAuth2Adapter(request)
+        self.assertEqual(adapter.get_callback_url(request, None), APPLE_CALLBACK)
+
+    def test_apple_form_post_is_forwarded_to_finish_endpoint(self):
+        response = self.client.post('/accounts/apple/callback/', {})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/accounts/apple/callback/finish/', response.headers['Location'])
 
 
 class RegistrationAgeTests(TestCase):
