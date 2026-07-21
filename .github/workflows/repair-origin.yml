@@ -1,0 +1,126 @@
+name: CityBeach HTTPS-Ursprung reparieren
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: citybeach-origin-repair
+  cancel-in-progress: true
+
+jobs:
+  repair-origin:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH-Werkzeug installieren
+        run: sudo apt-get update && sudo apt-get install -y sshpass curl
+
+      - name: Ursprung reparieren
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+          DOMAIN: citybeach.smarbiz.sbs
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$PASS"
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" "CITY_HOST='$HOST' CITY_DOMAIN='$DOMAIN' bash -s" <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+
+          apt-get update
+          apt-get install -y nginx certbot python3-certbot-nginx curl docker.io docker-compose-v2
+          systemctl enable --now docker nginx
+
+          if command -v ufw >/dev/null 2>&1; then
+            ufw allow 22/tcp || true
+            ufw allow 80/tcp || true
+            ufw allow 443/tcp || true
+          fi
+
+          APP_DIR=/root/citybeach
+          cd "$APP_DIR"
+          git fetch --depth 1 origin main
+          git reset --hard FETCH_HEAD
+          docker compose up -d --build --remove-orphans
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8022/health/ >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8022/health/
+
+          cat >/etc/nginx/sites-available/citybeach <<NGINX
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+              server_name $CITY_DOMAIN $CITY_HOST _;
+              client_max_body_size 20M;
+
+              location / {
+                  proxy_pass http://127.0.0.1:8022;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+              }
+          }
+          NGINX
+
+          rm -f /etc/nginx/sites-enabled/default
+          ln -sfn /etc/nginx/sites-available/citybeach /etc/nginx/sites-enabled/citybeach
+          nginx -t
+          systemctl restart nginx
+
+          curl -fsS -H "Host: $CITY_DOMAIN" http://127.0.0.1/health/
+
+          certbot --nginx \
+            --non-interactive \
+            --agree-tos \
+            --register-unsafely-without-email \
+            --redirect \
+            --keep-until-expiring \
+            -d "$CITY_DOMAIN"
+
+          nginx -t
+          systemctl restart nginx
+          ss -lntp | grep -E ':(80|443) '
+          curl -kfsS --resolve "$CITY_DOMAIN:443:127.0.0.1" "https://$CITY_DOMAIN/health/"
+          REMOTE
+
+      - name: Öffentliche Adresse prüfen
+        env:
+          DOMAIN: citybeach.smarbiz.sbs
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS --connect-timeout 10 --max-time 25 "https://$DOMAIN/health/"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Ergebnis melden
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          BODY="CityBeach HTTPS-Ursprungsreparatur: **${STATUS}**%0A%0AAdresse: https://citybeach.smarbiz.sbs%0AAusführung: ${RUN_URL}"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/5/comments" \
+            -d "{\"body\":\"${BODY}\"}"
