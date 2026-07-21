@@ -19,7 +19,7 @@ jobs:
           PASS: ${{ secrets.PASS }}
         run: |
           test -n "$HOST" && test -n "$PASS"
-          sshpass -p "$PASS" ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          sshpass -p "$PASS" ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" "CITY_HOST='$HOST' bash -s" <<'REMOTE'
           set -euo pipefail
           if command -v ufw >/dev/null 2>&1; then
             ufw allow 22/tcp || true
@@ -27,10 +27,13 @@ jobs:
           fi
           iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
           ip6tables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p tcp --dport 80 -j ACCEPT || true
+          rm -f /etc/nginx/sites-enabled/default
+          sed -i 's/listen 80;/listen 80 default_server;/' /etc/nginx/sites-available/citybeach
+          sed -i 's/server_name .*/server_name _;/' /etc/nginx/sites-available/citybeach
           nginx -t
           systemctl restart nginx
           ss -ltnp | grep ':80 '
-          curl -fsS --retry 5 --retry-delay 2 http://127.0.0.1/health/
+          curl -fsS --retry 5 --retry-delay 2 -H "Host: ${CITY_HOST}" http://127.0.0.1/health/
           REMOTE
           curl -fsS --connect-timeout 10 --max-time 20 --retry 5 --retry-delay 5 "http://${HOST}/health/"
       - name: Report network result
