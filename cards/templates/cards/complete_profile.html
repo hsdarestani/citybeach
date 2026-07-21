@@ -1,0 +1,18 @@
+{% extends 'cards/base.html' %}
+{% block title %}Profil vervollständigen · CityBeach Frankfurt{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="auth-shell">
+  <div class="auth-image"></div>
+  <div class="auth-card">
+    <span class="eyebrow">NUR NOCH EIN SCHRITT</span>
+    <h1>Vervollständige dein Profil.</h1>
+    <p>Apple übermittelt weder deine Mobilnummer noch dein Geburtsdatum. Diese Angaben benötigen wir für deine Mitgliedskarte und die Altersprüfung.</p>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button class="primary full">Profil speichern und fortfahren</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

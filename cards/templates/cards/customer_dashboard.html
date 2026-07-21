@@ -1,1 +1,73 @@
-{% extends 'cards/base.html' %}{% block title %}My CityBeach{% endblock %}{% block content %}<section class="app-head"><div><span class="eyebrow">HELLO {{ wallet.display_name|upper }}</span><h1>My CityBeach</h1></div><span class="tier {{ wallet.tier|lower }}">{{ wallet.get_tier_display }} Member</span></section><form class="venue-tabs" method="get">{% for venue in venues %}<button name="venue" value="{{ venue.id }}" class="{% if selected.id == venue.id %}active{% endif %}">{{ venue.name }}</button>{% endfor %}</form><section class="member-layout"><article class="member-card"><div class="sun-wave"><span></span></div><div class="card-top"><b>CITYBEACH</b><small>FRANKFURT · powered by A+</small></div><div class="balance"><small>A+ PAY GUTHABEN</small><strong>{{ wallet.balance|floatformat:2 }} €</strong></div><div class="card-bottom"><span>MEMBER {{ wallet.member_number }}</span><span>{{ wallet.get_tier_display|upper }}</span></div></article><article class="qr-panel"><img src="{% url 'qr_card' %}" alt="QR Member Card"><b>SCAN TO PAY</b><small>{{ wallet.qr_token }}</small></article></section>{% if pending %}<section class="payment-confirm"><span class="eyebrow">ZAHLUNG BESTÄTIGEN</span><h2>{{ pending.base_amount|floatformat:2 }} € · {{ pending.venue.name }}</h2><p>{{ pending.description }}</p><form method="post" action="{% url 'confirm_payment' pending.id %}">{% csrf_token %}<div class="tip-options">{% for option in tip_options %}<label><input type="radio" name="tip_percentage" value="{{ option }}" {% if forloop.first %}checked{% endif %}><span>{{ option|floatformat:0 }}%</span></label>{% endfor %}</div><button class="primary full">Zahlung bestätigen</button></form></section>{% endif %}<section><div class="section-head"><span>LIVE FROM {{ selected.name|upper }}</span><h2>Offers & Events</h2></div><div class="offer-grid">{% for offer in offers %}<article class="offer-card">{% if offer.image %}<img src="{{ offer.image.url }}">{% endif %}<div><small>{{ offer.venue.name|default:'CITYBEACH MEMBER' }}</small><h3>{{ offer.title }}</h3><p>{{ offer.body }}</p></div></article>{% empty %}<p class="muted">Neue Specials kommen bald.</p>{% endfor %}</div></section><section class="app-grid"><article class="panel"><h3>{{ selected.name }}</h3><p>{{ selected.subtitle }}</p><p>{{ selected.opening_hours }}</p><div class="link-row"><a href="{{ selected.website_url }}" target="_blank">Website</a><a href="{{ selected.instagram_url }}" target="_blank">Instagram</a>{% if selected.reservation_url %}<a href="{{ selected.reservation_url }}" target="_blank">Reservieren</a>{% endif %}</div></article><article class="panel"><h3>Letzte Transaktionen</h3>{% for entry in entries %}<a class="transaction" href="{% url 'receipt' entry.id %}"><span>{{ entry.get_entry_type_display }}<small>{{ entry.venue.name }} · {{ entry.created_at|date:'d.m.Y H:i' }}</small></span><b>{% if entry.entry_type == 'TOPUP' or entry.entry_type == 'REFUND' or entry.entry_type == 'BONUS' %}+{% else %}-{% endif %}{{ entry.amount|floatformat:2 }} €</b></a>{% empty %}<p class="muted">Noch keine Transaktionen.</p>{% endfor %}</article></section>{% endblock %}
+{% extends 'cards/base.html' %}
+{% block title %}Mein CityBeach{% endblock %}
+{% block content %}
+<section class="app-head">
+  <div><span class="eyebrow">HALLO {{ wallet.display_name|upper }}</span><h1>Mein CityBeach</h1></div>
+  <span class="tier {{ wallet.tier|lower }}">Stufe {{ wallet.get_tier_display }}</span>
+</section>
+
+<form class="venue-tabs" method="get">
+  {% for venue in venues %}<button name="venue" value="{{ venue.id }}" class="{% if selected.id == venue.id %}active{% endif %}">{{ venue.name }}</button>{% endfor %}
+</form>
+
+<section class="member-layout">
+  <article class="member-card">
+    <div class="sun-wave"><span></span></div>
+    <div class="card-top"><b>CITYBEACH</b><small>FRANKFURT · TECHNIK VON A+</small></div>
+    <div class="balance"><small>A+ PAY GUTHABEN</small><strong>{{ wallet.balance|floatformat:2 }} €</strong></div>
+    <div class="card-bottom"><span>MITGLIED {{ wallet.member_number }}</span><span>{{ wallet.get_tier_display|upper }}</span></div>
+  </article>
+  <article class="qr-panel">
+    <img src="{% url 'qr_card' %}" alt="QR-Code der Mitgliedskarte">
+    <b>ZUM BEZAHLEN SCANNEN</b>
+    <small>{{ wallet.qr_token }}</small>
+  </article>
+</section>
+
+{% if pending %}
+<section class="payment-confirm">
+  <span class="eyebrow">ZAHLUNG BESTÄTIGEN</span>
+  <h2>{{ pending.base_amount|floatformat:2 }} € · {{ pending.venue.name }}</h2>
+  <p>{{ pending.description }}</p>
+  <form method="post" action="{% url 'confirm_payment' pending.id %}">
+    {% csrf_token %}
+    <div class="tip-options">
+      {% for option in tip_options %}<label><input type="radio" name="tip_percentage" value="{{ option }}" {% if forloop.first %}checked{% endif %}><span>{{ option|floatformat:0 }} %</span></label>{% endfor %}
+    </div>
+    <button class="primary full">Zahlung bestätigen</button>
+  </form>
+</section>
+{% endif %}
+
+<section>
+  <div class="section-head"><span>AKTUELL AUS {{ selected.name|upper }}</span><h2>Angebote & Veranstaltungen</h2></div>
+  <div class="offer-grid">
+    {% for offer in offers %}
+      <article class="offer-card">
+        {% if offer.image %}<img src="{{ offer.image.url }}" alt="{{ offer.title }}">{% endif %}
+        <div><small>{{ offer.venue.name|default:'FÜR ALLE CITYBEACH-MITGLIEDER' }}</small><h3>{{ offer.title }}</h3><p>{{ offer.body }}</p></div>
+      </article>
+    {% empty %}<p class="muted">Neue besondere Aktionen folgen bald.</p>{% endfor %}
+  </div>
+</section>
+
+<section class="app-grid">
+  <article class="panel">
+    <h3>{{ selected.name }}</h3><p>{{ selected.subtitle }}</p><p>{{ selected.opening_hours }}</p>
+    <div class="link-row">
+      <a href="{{ selected.website_url }}" target="_blank">Internetseite</a>
+      <a href="{{ selected.instagram_url }}" target="_blank">Instagram</a>
+      {% if selected.reservation_url %}<a href="{{ selected.reservation_url }}" target="_blank">Reservieren</a>{% endif %}
+    </div>
+  </article>
+  <article class="panel">
+    <h3>Letzte Buchungen</h3>
+    {% for entry in entries %}
+      <a class="transaction" href="{% url 'receipt' entry.id %}">
+        <span>{{ entry.get_entry_type_display }}<small>{{ entry.venue.name }} · {{ entry.created_at|date:'d.m.Y H:i' }}</small></span>
+        <b>{% if entry.entry_type == 'TOPUP' or entry.entry_type == 'REFUND' or entry.entry_type == 'BONUS' %}+{% else %}-{% endif %}{{ entry.amount|floatformat:2 }} €</b>
+      </a>
+    {% empty %}<p class="muted">Noch keine Buchungen vorhanden.</p>{% endfor %}
+  </article>
+</section>
+{% endblock %}

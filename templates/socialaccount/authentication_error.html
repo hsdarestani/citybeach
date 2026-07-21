@@ -1,0 +1,10 @@
+{% extends 'cards/base.html' %}
+{% block title %}Apple-Anmeldung fehlgeschlagen · CityBeach Frankfurt{% endblock %}
+{% block content %}
+<section class="panel social-error">
+  <span class="eyebrow">APPLE-ANMELDUNG</span>
+  <h1>Die Anmeldung konnte nicht abgeschlossen werden.</h1>
+  <p>Bitte versuche es erneut. Falls das Problem bestehen bleibt, melde dich mit deiner E-Mail-Adresse an.</p>
+  <div class="button-row"><a class="primary" href="{% url 'login' %}">Erneut anmelden</a><a class="secondary" href="{% url 'landing' %}">Zur Startseite</a></div>
+</section>
+{% endblock %}

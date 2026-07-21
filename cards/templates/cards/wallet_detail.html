@@ -1,1 +1,20 @@
-{% extends 'cards/base.html' %}{% block title %}{{ wallet.display_name }} · CityBeach{% endblock %}{% block content %}<section class="app-head"><div><a href="{% url 'owner_dashboard' %}">← Owner Dashboard</a><span class="eyebrow">MEMBER #{{ wallet.member_number }}</span><h1>{{ wallet.display_name }}</h1><p>{{ wallet.email }} · {{ wallet.phone }}</p></div><div class="balance-badge"><small>GUTHABEN</small><strong>{{ wallet.balance|floatformat:2 }} €</strong><span>{{ wallet.get_tier_display }}</span></div></section><section class="owner-grid"><article class="panel"><h2>Guthaben bearbeiten</h2><form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<div class="button-row"><button name="action" value="topup" class="primary">Aufladen</button><button name="action" value="refund" class="secondary">Rückerstattung</button></div></form><form method="post" action="{% url 'toggle_wallet' wallet.id %}">{% csrf_token %}<button class="danger full">{% if wallet.status == 'ACTIVE' %}Karte sperren{% else %}Karte aktivieren{% endif %}</button></form></article><article class="qr-panel"><div class="sun-wave"><span></span></div><h3>A+ PAY MEMBER</h3><p>{{ wallet.get_status_display }} · {{ wallet.get_tier_display }}</p><small>{{ wallet.qr_token }}</small></article></section><section class="panel"><h2>Transaktionen</h2>{% for entry in entries %}<a class="transaction" href="{% url 'receipt' entry.id %}"><span>{{ entry.get_entry_type_display }}<small>{{ entry.venue.name|default:'Allgemein' }} · {{ entry.created_at|date:'d.m.Y H:i' }}</small></span><b>{{ entry.amount|floatformat:2 }} €</b></a>{% endfor %}</section>{% endblock %}
+{% extends 'cards/base.html' %}
+{% block title %}{{ wallet.display_name }} · CityBeach Frankfurt{% endblock %}
+{% block content %}
+<section class="app-head">
+  <div><a href="{% url 'owner_dashboard' %}">← Zur Inhaberübersicht</a><span class="eyebrow">MITGLIED #{{ wallet.member_number }}</span><h1>{{ wallet.display_name }}</h1><p>{{ wallet.email }} · {{ wallet.phone }}</p></div>
+  <div class="balance-badge"><small>GUTHABEN</small><strong>{{ wallet.balance|floatformat:2 }} €</strong><span>{{ wallet.get_tier_display }}</span></div>
+</section>
+<section class="owner-grid">
+  <article class="panel">
+    <h2>Guthaben bearbeiten</h2>
+    <form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<div class="button-row"><button name="action" value="topup" class="primary">Aufladen</button><button name="action" value="refund" class="secondary">Rückerstattung</button></div></form>
+    <form method="post" action="{% url 'toggle_wallet' wallet.id %}">{% csrf_token %}<button class="danger full">{% if wallet.status == 'ACTIVE' %}Karte sperren{% else %}Karte aktivieren{% endif %}</button></form>
+  </article>
+  <article class="qr-panel"><div class="sun-wave"><span></span></div><h3>A+ PAY MITGLIED</h3><p>{{ wallet.get_status_display }} · {{ wallet.get_tier_display }}</p><small>{{ wallet.qr_token }}</small></article>
+</section>
+<section class="panel">
+  <h2>Buchungen</h2>
+  {% for entry in entries %}<a class="transaction" href="{% url 'receipt' entry.id %}"><span>{{ entry.get_entry_type_display }}<small>{{ entry.venue.name|default:'Allgemein' }} · {{ entry.created_at|date:'d.m.Y H:i' }}</small></span><b>{{ entry.amount|floatformat:2 }} €</b></a>{% empty %}<p class="muted">Noch keine Buchungen vorhanden.</p>{% endfor %}
+</section>
+{% endblock %}

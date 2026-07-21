@@ -1,5 +1,6 @@
 Django~=5.2.0
 djangorestframework~=3.16.0
+django-allauth[socialaccount]>=65.18,<66
 dj-database-url>=2.3,<3
 psycopg[binary]>=3.2,<4
 gunicorn>=23,<24

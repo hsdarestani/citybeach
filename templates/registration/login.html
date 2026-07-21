@@ -1,1 +1,35 @@
-{% extends 'cards/base.html' %}{% block title %}Login · CityBeach{% endblock %}{% block body_class %}auth-page{% endblock %}{% block content %}<section class="auth-shell"><div class="auth-image"></div><div class="auth-card"><span class="eyebrow">WELCOME BACK</span><h1>Your rooftop is waiting.</h1><p>Login für Gäste, Crew und Owner.</p><form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<button class="primary full">Login</button></form><a href="{% url 'register' %}">Noch keine Member Card?</a></div></section>{% endblock %}
+{% extends 'cards/base.html' %}
+{% load socialaccount %}
+{% block title %}Anmelden · CityBeach Frankfurt{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="auth-shell">
+  <div class="auth-image"></div>
+  <div class="auth-card">
+    <span class="eyebrow">SCHÖN, DASS DU WIEDER DA BIST</span>
+    <h1>Deine Dachterrasse wartet.</h1>
+    <p>Anmeldung für Gäste, Mitarbeiter und Inhaber.</p>
+
+    {% if apple_login_enabled %}
+      <a class="apple-button" href="{% provider_login_url 'apple' process='login' %}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.34-.07 2.27.74 3.05.79 1.17-.24 2.29-.93 3.54-.84 1.5.12 2.63.71 3.38 1.8-3.09 1.85-2.36 5.92.48 7.06-.57 1.5-1.31 2.99-2.45 4.17ZM12.03 7.25C11.88 5.02 13.69 3.18 15.77 3c.29 2.58-2.34 4.5-3.74 4.25Z"/></svg>
+        <span>Mit Apple fortfahren</span>
+      </a>
+    {% else %}
+      <span class="apple-button disabled" aria-disabled="true" title="Die Apple-Zugangsdaten müssen noch hinterlegt werden.">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.34-.07 2.27.74 3.05.79 1.17-.24 2.29-.93 3.54-.84 1.5.12 2.63.71 3.38 1.8-3.09 1.85-2.36 5.92.48 7.06-.57 1.5-1.31 2.99-2.45 4.17ZM12.03 7.25C11.88 5.02 13.69 3.18 15.77 3c.29 2.58-2.34 4.5-3.74 4.25Z"/></svg>
+        <span>Mit Apple fortfahren</span>
+      </span>
+      <small class="apple-hint">Die Apple-Anmeldung wird nach Hinterlegung der Apple-Zugangsdaten aktiviert.</small>
+    {% endif %}
+
+    <div class="auth-divider"><span>oder mit E-Mail-Adresse</span></div>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button class="primary full">Anmelden</button>
+    </form>
+    <a href="{% url 'register' %}">Noch keine Mitgliedskarte? Jetzt registrieren</a>
+  </div>
+</section>
+{% endblock %}
