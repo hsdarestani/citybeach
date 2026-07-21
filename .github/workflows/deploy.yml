@@ -70,6 +70,18 @@ jobs:
           cd /root/citybeach
           test -f .env
 
+          set_env() {
+            key="$1"
+            value="$2"
+            if grep -q "^${key}=" .env; then
+              sed -i "s|^${key}=.*|${key}=${value}|" .env
+            else
+              printf '%s=%s\n' "$key" "$value" >> .env
+            fi
+          }
+
+          set_env APPLE_REDIRECT_URI "https://citybeach.smarbiz.sbs/accounts/apple/callback/"
+
           git fetch --depth 1 origin main
           git reset --hard FETCH_HEAD
           docker compose up -d --build --remove-orphans
@@ -88,13 +100,17 @@ jobs:
           from allauth.socialaccount.models import SocialApp
           from django.conf import settings
           from django.test import Client
+          from django.urls import resolve
 
+          expected = 'https://citybeach.smarbiz.sbs/accounts/apple/callback/'
           assert settings.APPLE_LOGIN_ENABLED
+          assert settings.APPLE_REDIRECT_URI == expected
           app = SocialApp.objects.get(provider='apple', client_id=settings.APPLE_CLIENT_ID)
           assert app.sites.filter(pk=settings.SITE_ID).exists()
           assert app.secret == settings.APPLE_KEY_ID
           assert app.key == settings.APPLE_TEAM_ID
           assert 'BEGIN PRIVATE KEY' in app.settings.get('certificate_key', '')
+          assert resolve('/accounts/apple/callback/').url_name == 'apple_callback'
 
           client = Client(raise_request_exception=True, HTTP_HOST='citybeach.smarbiz.sbs')
           response = client.get('/accounts/apple/login/', secure=True)
@@ -105,7 +121,7 @@ jobs:
           assert parsed.netloc == 'appleid.apple.com'
           assert parsed.path.startswith('/auth/authorize')
           assert query.get('client_id', [''])[0] == settings.APPLE_CLIENT_ID
-          assert query.get('redirect_uri', [''])[0] == 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'
+          assert query.get('redirect_uri', [''])[0] == expected
           print('CITYBEACH_APPLE_OK=1')
           PY
 
@@ -133,6 +149,7 @@ jobs:
               '## CityBeach Produktionsstatus\n\n'
               f"- Bereitstellung: **{'erfolgreich' if success else 'fehlgeschlagen'}**\n"
               f"- Apple-Anmeldung: **{'verbunden und geprüft' if success else 'nicht bestätigt'}**\n"
+              '- Apple-Rücksprungadresse: `https://citybeach.smarbiz.sbs/accounts/apple/callback/`\n'
               f"- Stand: `{os.environ['SHA']}`\n"
               f"- Ausführung: {os.environ['RUN_URL']}\n"
               '- Adresse: https://citybeach.smarbiz.sbs\n'
