@@ -35,7 +35,7 @@ jobs:
           git fetch --depth 1 origin main
           git reset --hard FETCH_HEAD
 
-          # Das alte Web bleibt während des Image-Builds erreichbar.
+          # Das bisherige Web bleibt während des Image-Builds erreichbar.
           docker compose build web
           docker compose up -d --no-deps web
 
@@ -72,7 +72,7 @@ jobs:
 
           successful = os.environ['JOB_STATUS'] == 'success'
           body = (
-              '## CityBeach Produktionsstatus\n\n'
+              '## QR-Scanner Produktionsstatus\n\n'
               f"- Bereitstellung: **{'erfolgreich' if successful else 'fehlgeschlagen'}**\n"
               f"- Inhaber-QR-Scanner: **{'aktiv und geprüft' if successful else 'nicht bestätigt'}**\n"
               '- Bestehende Apple-Konfiguration und Datenbank: **unverändert**\n'
@@ -81,7 +81,7 @@ jobs:
               '- Adresse: https://citybeach.smarbiz.sbs\n'
           )
           request = urllib.request.Request(
-              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/2",
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/22",
               data=json.dumps({'body': body}).encode(),
               headers={
                   'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
