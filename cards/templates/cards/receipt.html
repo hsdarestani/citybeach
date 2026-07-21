@@ -13,7 +13,7 @@
     <p><span>Guthaben vorher</span><b>{{ entry.balance_before|floatformat:2 }} €</b></p>
     <p><span>Guthaben danach</span><b>{{ entry.balance_after|floatformat:2 }} €</b></p>
     <p><span>Zeitpunkt</span><b>{{ entry.created_at|date:'d.m.Y H:i:s' }}</b></p>
-    <p><span>Mitarbeiter</span><b>{{ entry.performed_by.username }}</b></p>
+    <p><span>Mitarbeiter</span><b>{{ entry.performed_by.get_full_name|default:entry.performed_by.username }}</b></p>
     {% if entry.description %}<p><span>Beschreibung</span><b>{{ entry.description }}</b></p>{% endif %}
   </div>
   <button class="primary full" onclick="window.print()">Beleg drucken</button>
