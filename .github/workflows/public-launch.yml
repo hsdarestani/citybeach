@@ -1,0 +1,86 @@
+name: CityBeach Public Launch
+on:
+  workflow_run:
+    workflows: ["Test and Deploy CityBeach"]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  launch:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Validate requested server
+        id: target
+        env:
+          HOST: ${{ secrets.HOST }}
+        run: |
+          if [ "$HOST" = "91.107.155.215" ]; then
+            echo "match=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "match=no" >> "$GITHUB_OUTPUT"
+            echo "The HOST secret does not match 91.107.155.215." >&2
+            exit 1
+          fi
+      - name: Configure public Nginx endpoint
+        id: network
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        run: |
+          test -n "$HOST" && test -n "$PASS"
+          sshpass -p "$PASS" ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          test -f /root/citybeach/.env
+          docker compose -f /root/citybeach/docker-compose.yml --env-file /root/citybeach/.env ps
+          curl -fsS --retry 10 --retry-delay 3 http://127.0.0.1:8022/health/
+          if command -v ufw >/dev/null 2>&1; then
+            ufw allow 22/tcp || true
+            ufw allow 80/tcp || true
+            ufw allow 443/tcp || true
+          fi
+          iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
+          iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT
+          rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/citybeach /etc/nginx/sites-enabled/citybeach-public
+          cat >/etc/nginx/sites-available/citybeach-public <<'NGINX'
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+              server_name _;
+              client_max_body_size 20M;
+              location / {
+                  proxy_pass http://127.0.0.1:8022;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+          NGINX
+          ln -sfn /etc/nginx/sites-available/citybeach-public /etc/nginx/sites-enabled/citybeach-public
+          nginx -t
+          systemctl restart nginx
+          curl -fsS --retry 5 --retry-delay 2 -H 'Host: 91.107.155.215' http://127.0.0.1/health/
+          ss -ltnp | grep ':80 '
+          REMOTE
+      - name: Verify from public internet
+        id: external
+        env:
+          HOST: ${{ secrets.HOST }}
+        run: curl -fsS --connect-timeout 15 --max-time 30 --retry 8 --retry-delay 5 "http://${HOST}/health/"
+      - name: Report final launch result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ job.status }}
+          HOST_MATCH: ${{ steps.target.outputs.match }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          BODY="CityBeach final public launch: **${STATUS}**%0A%0AHOST secret matches requested IP: **${HOST_MATCH:-not-checked}**%0AEndpoint: http://91.107.155.215/health/%0AApp: http://91.107.155.215/%0ARun: ${RUN_URL}"
+          curl -fsS -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/3/comments" -d "{\"body\":\"${BODY}\"}"
