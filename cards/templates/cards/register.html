@@ -1,1 +1,19 @@
-{% extends 'cards/base.html' %}{% block title %}Member werden · CityBeach{% endblock %}{% block body_class %}auth-page{% endblock %}{% block content %}<section class="auth-shell"><div class="auth-image"></div><div class="auth-card"><span class="eyebrow">CITYBEACH MEMBER</span><h1>Join the rooftop.</h1><p>Ein Account für CityBeach, CityAlm, A+ Pay und exklusive Member Offers.</p><form method="post" class="form-grid">{% csrf_token %}{{ form.as_p }}<button class="primary full">Member Card erstellen</button></form><a href="{% url 'login' %}">Bereits registriert? Login</a></div></section>{% endblock %}
+{% extends 'cards/base.html' %}
+{% block title %}Mitglied werden · CityBeach Frankfurt{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="auth-shell">
+  <div class="auth-image"></div>
+  <div class="auth-card">
+    <span class="eyebrow">CITYBEACH-MITGLIEDSCHAFT</span>
+    <h1>Werde Teil der Dachterrasse.</h1>
+    <p>Ein Konto für CityBeach, CityAlm, A+ Pay und exklusive Angebote.</p>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button class="primary full">Mitgliedskarte erstellen</button>
+    </form>
+    <a href="{% url 'login' %}">Bereits registriert? Jetzt anmelden</a>
+  </div>
+</section>
+{% endblock %}
