@@ -13,7 +13,19 @@ jobs:
           python-version: '3.13'
       - run: pip install -q -r requirements.txt
       - name: Alle Django-Tests
+        id: django_tests
+        continue-on-error: true
         env:
           DJANGO_DEBUG: '1'
           DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
-        run: python manage.py test -v 1
+        run: |
+          python manage.py test -v 2 > test-output.txt 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: django-test-output
+          path: test-output.txt
+      - name: Testergebnis übernehmen
+        if: steps.django_tests.outputs.exit_code != '0'
+        run: exit 1
