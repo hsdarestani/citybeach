@@ -5,6 +5,7 @@ on:
     branches: [main]
 permissions:
   contents: read
+  issues: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -41,12 +42,13 @@ jobs:
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y sshpass
       - name: Deploy to Hetzner
+        id: deploy
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
         run: |
           test -n "$HOST" && test -n "$PASS"
-          sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" "CITY_HOST='$HOST' bash -s" <<'REMOTE'
+          sshpass -p "$PASS" ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" "CITY_HOST='$HOST' bash -s" <<'REMOTE'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
@@ -116,3 +118,17 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8022/health/
           REMOTE
+      - name: Report deployment result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          BODY="CityBeach production deployment: **${JOB_STATUS}**%0A%0ACommit: \`${SHA}\`%0ARun: ${RUN_URL}%0ATarget: http://91.107.155.215"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/2/comments" \
+            -d "{\"body\":\"${BODY}\"}"
