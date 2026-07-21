@@ -1,13 +1,15 @@
 name: Open CityBeach HTTP
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["Test and Deploy CityBeach"]
+    types: [completed]
   workflow_dispatch:
 permissions:
   contents: read
   issues: write
 jobs:
   open-and-verify:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -27,6 +29,7 @@ jobs:
           fi
           iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
           ip6tables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p tcp --dport 80 -j ACCEPT || true
+          test -f /etc/nginx/sites-available/citybeach
           rm -f /etc/nginx/sites-enabled/default
           sed -i 's/listen 80;/listen 80 default_server;/' /etc/nginx/sites-available/citybeach
           sed -i 's/server_name .*/server_name _;/' /etc/nginx/sites-available/citybeach
