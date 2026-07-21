@@ -1,10 +1,10 @@
-name: QR-Scanner einzeln prüfen
+name: Gesamttests kompakt prüfen
 
 on:
   pull_request:
 
 jobs:
-  qr-test:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,8 +12,8 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -q -r requirements.txt
-      - name: QR-Scanner-Tests
+      - name: Alle Django-Tests
         env:
           DJANGO_DEBUG: '1'
           DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
-        run: python manage.py test cards.tests.OwnerQrScannerTests -v 2
+        run: python manage.py test -v 1
