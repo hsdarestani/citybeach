@@ -1,0 +1,42 @@
+name: Apple-Pythonfehler exakt prüfen
+
+on:
+  pull_request:
+
+jobs:
+  traceback:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH-Werkzeug installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Apple-Ansicht direkt in Django ausführen
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /root/citybeach
+          docker compose exec -T web python manage.py shell <<'PY'
+          import traceback
+          from django.test import Client
+
+          client = Client(raise_request_exception=True, HTTP_HOST='citybeach.smarbiz.sbs')
+          try:
+              response = client.get('/accounts/apple/login/', secure=True)
+              print('STATUS=', response.status_code)
+              print('LOCATION_HOST=', response.headers.get('Location', '').split('/')[2] if response.headers.get('Location', '').startswith('https://') else '')
+              if response.status_code >= 500:
+                  raise RuntimeError(f'Apple login returned {response.status_code}')
+          except Exception:
+              traceback.print_exc()
+              raise
+          PY
+          REMOTE
