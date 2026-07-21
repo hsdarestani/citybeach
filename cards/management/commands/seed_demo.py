@@ -2,6 +2,8 @@ import os
 from datetime import date
 from decimal import Decimal
 
+from allauth.socialaccount.models import SocialApp
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.sites.models import Site
 from django.core.management.base import BaseCommand
@@ -11,14 +13,30 @@ from cards.services import post_entry
 
 
 class Command(BaseCommand):
-    help = 'Erstellt die CityBeach-Demodaten wiederholbar und ohne Duplikate.'
+    help = 'Erstellt die CityBeach-Demodaten und externe Anmeldungen wiederholbar und ohne Duplikate.'
 
     def handle(self, *args, **options):
         User = get_user_model()
-        Site.objects.update_or_create(
+        site, _ = Site.objects.update_or_create(
             pk=1,
             defaults={'domain': 'citybeach.smarbiz.sbs', 'name': 'CityBeach Frankfurt'},
         )
+
+        if settings.APPLE_LOGIN_ENABLED:
+            apple_app, _ = SocialApp.objects.update_or_create(
+                provider='apple',
+                client_id=settings.APPLE_CLIENT_ID,
+                defaults={
+                    'name': 'CityBeach – Mit Apple fortfahren',
+                    'secret': settings.APPLE_KEY_ID,
+                    'key': settings.APPLE_TEAM_ID,
+                    'settings': {'certificate_key': settings.APPLE_PRIVATE_KEY},
+                },
+            )
+            apple_app.sites.set([site])
+            SocialApp.objects.filter(provider='apple').exclude(pk=apple_app.pk).delete()
+            self.stdout.write(self.style.SUCCESS('Apple-Anmeldung ist mit CityBeach verbunden.'))
+
         business, _ = Business.objects.update_or_create(
             slug='citybeach-frankfurt',
             defaults={'name': 'CityBeach Frankfurt', 'currency': 'EUR'},
