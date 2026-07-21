@@ -35,16 +35,27 @@ jobs:
           git fetch --depth 1 origin main
           git reset --hard FETCH_HEAD
 
-          # Das bisherige Web bleibt während des Image-Builds erreichbar.
+          # Das laufende Web bleibt während des Builds erreichbar.
           docker compose build web
-          docker compose up -d --no-deps web
 
-          for i in $(seq 1 30); do
+          # Nur der Webdienst wird anschließend mit dem fertigen Image ersetzt.
+          docker compose up -d --no-deps --force-recreate web
+
+          ready=0
+          for i in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:8022/health/ >/dev/null; then
+              ready=1
               break
             fi
             sleep 2
           done
+
+          if [ "$ready" != "1" ]; then
+            docker compose ps
+            docker compose logs --tail=160 web
+            exit 1
+          fi
+
           curl -fsS http://127.0.0.1:8022/health/
           docker compose exec -T web python manage.py shell -c "from django.urls import reverse; assert reverse('owner_wallet_scan') == '/owner/wallet/scan/'"
           REMOTE
