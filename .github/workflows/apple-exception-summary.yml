@@ -1,0 +1,43 @@
+name: Apple-Ausnahme kurz anzeigen
+
+on:
+  pull_request:
+
+jobs:
+  exception-summary:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH-Werkzeug installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Exakten allauth-Fehler anzeigen
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        run: |
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /root/citybeach
+          docker compose exec -T web python manage.py shell <<'PY'
+          import traceback
+          from django.test import Client
+
+          client = Client(raise_request_exception=True, HTTP_HOST='citybeach.smarbiz.sbs')
+          try:
+              client.get('/accounts/apple/login/', secure=True)
+          except Exception as exc:
+              print('EXCEPTION_TYPE=', type(exc).__name__)
+              print('EXCEPTION_MESSAGE=', str(exc))
+              print('TRACEBACK_LAST_FRAMES=')
+              for frame in traceback.extract_tb(exc.__traceback__)[-8:]:
+                  print(f'{frame.filename}:{frame.lineno} in {frame.name}: {frame.line or ""}')
+              raise SystemExit(1)
+          else:
+              print('NO_EXCEPTION=1')
+          PY
+          REMOTE
