@@ -1,0 +1,73 @@
+name: Apple-Weiterleitung am Ursprung prüfen
+
+on:
+  pull_request:
+
+jobs:
+  origin-check:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH-Werkzeug installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Django- und Apple-Weiterleitung direkt prüfen
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" "APPLE_CLIENT_ID='$APPLE_CLIENT_ID' python3 -" <<'PY'
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          expected_client = os.environ['APPLE_CLIENT_ID']
+          expected_redirect = 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'
+
+          headers = {
+              'Host': 'citybeach.smarbiz.sbs',
+              'X-Forwarded-Proto': 'https',
+              'User-Agent': 'CityBeach Origin Apple Check',
+          }
+          login_request = urllib.request.Request(
+              'http://127.0.0.1:8022/accounts/login/', headers=headers
+          )
+          html = urllib.request.urlopen(login_request, timeout=20).read().decode(errors='replace')
+          assert 'Mit Apple fortfahren' in html
+          print('LOGIN_BUTTON_OK=1')
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect)
+          apple_request = urllib.request.Request(
+              'http://127.0.0.1:8022/accounts/apple/login/', headers=headers
+          )
+          try:
+              response = opener.open(apple_request, timeout=20)
+              location = response.headers.get('Location', '')
+          except urllib.error.HTTPError as exc:
+              if exc.code not in (301, 302, 303, 307, 308):
+                  raise
+              location = exc.headers.get('Location', '')
+
+          parsed = urllib.parse.urlparse(location)
+          query = urllib.parse.parse_qs(parsed.query)
+          assert parsed.scheme == 'https'
+          assert parsed.netloc == 'appleid.apple.com'
+          assert parsed.path.startswith('/auth/authorize')
+          assert query.get('client_id', [''])[0] == expected_client
+          assert query.get('redirect_uri', [''])[0] == expected_redirect
+          print('APPLE_DOMAIN_OK=1')
+          print('APPLE_CLIENT_ID_OK=1')
+          print('APPLE_REDIRECT_URI_OK=1')
+          print('CITYBEACH_APPLE_ORIGIN_OK=1')
+          PY
