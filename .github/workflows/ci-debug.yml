@@ -1,0 +1,36 @@
+name: CityBeach Einzelprüfungen
+
+on:
+  pull_request:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Abhängigkeiten installieren
+        run: pip install -r requirements.txt
+      - name: Migrationen erzeugungsfrei prüfen
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py makemigrations --check --dry-run
+      - name: Migrationen anwenden
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py migrate --noinput
+      - name: Tests ausführen
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py test -v 2
+      - name: Statische Dateien sammeln
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py collectstatic --noinput
