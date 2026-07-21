@@ -1,11 +1,14 @@
 name: Test and Deploy CityBeach
+
 on:
   pull_request:
   push:
     branches: [main]
+
 permissions:
   contents: read
   issues: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -33,6 +36,7 @@ jobs:
           DJANGO_DEBUG: '1'
           DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
         run: python manage.py collectstatic --noinput
+
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
@@ -41,28 +45,39 @@ jobs:
     steps:
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y sshpass
+
       - name: Deploy to Hetzner
-        id: deploy
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
+          DOMAIN: citybeach.smarbiz.sbs
         run: |
           test -n "$HOST" && test -n "$PASS"
-          sshpass -p "$PASS" ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" "CITY_HOST='$HOST' bash -s" <<'REMOTE'
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" "CITY_HOST='$HOST' CITY_DOMAIN='$DOMAIN' bash -s" <<'REMOTE'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
+
           apt-get update
           apt-get install -y git curl docker.io docker-compose-v2 nginx openssl
           systemctl enable --now docker nginx
-          mkdir -p /root/citybeach
-          cd /root/citybeach
+
+          APP_DIR=/root/citybeach
+          ENV_FILE="$APP_DIR/.env"
+          mkdir -p "$APP_DIR"
+          cd "$APP_DIR"
+
           if [ ! -d .git ]; then
             git init
             git remote add origin https://github.com/hsdarestani/citybeach.git
           fi
           git fetch --depth 1 origin main
           git reset --hard FETCH_HEAD
-          if [ ! -f .env ]; then
+
+          if [ ! -f "$ENV_FILE" ]; then
             DJANGO_KEY="$(openssl rand -base64 48 | tr -d '\n')"
             DB_PASSWORD="$(openssl rand -hex 24)"
             OWNER_PASSWORD="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9@!_-')"
@@ -71,9 +86,6 @@ jobs:
             printf '%s\n' \
               "DJANGO_SECRET_KEY=$DJANGO_KEY" \
               "DJANGO_DEBUG=0" \
-              "DJANGO_ALLOWED_HOSTS=$CITY_HOST,127.0.0.1,localhost" \
-              "DJANGO_CSRF_TRUSTED_ORIGINS=http://$CITY_HOST" \
-              "DJANGO_SECURE_COOKIES=0" \
               "DATABASE_URL=postgresql://citybeach:$DB_PASSWORD@db:5432/citybeach" \
               "POSTGRES_DB=citybeach" \
               "POSTGRES_USER=citybeach" \
@@ -81,43 +93,69 @@ jobs:
               "APP_PORT=8022" \
               "CITYBEACH_OWNER_PASSWORD=$OWNER_PASSWORD" \
               "CITYBEACH_STAFF_PASSWORD=$STAFF_PASSWORD" \
-              "CITYBEACH_CUSTOMER_PASSWORD=$CUSTOMER_PASSWORD" > .env
-            chmod 600 .env
+              "CITYBEACH_CUSTOMER_PASSWORD=$CUSTOMER_PASSWORD" > "$ENV_FILE"
+            chmod 600 "$ENV_FILE"
           fi
+
+          set_env() {
+            key="$1"
+            value="$2"
+            if grep -q "^${key}=" "$ENV_FILE"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+            fi
+          }
+
+          set_env DJANGO_ALLOWED_HOSTS "$CITY_DOMAIN,$CITY_HOST,127.0.0.1,localhost"
+          set_env DJANGO_CSRF_TRUSTED_ORIGINS "https://$CITY_DOMAIN,http://$CITY_HOST"
+
           docker compose up -d --build --remove-orphans
           docker compose exec -T web python manage.py seed_demo
+
           set -a
-          . ./.env
+          . "$ENV_FILE"
           set +a
           printf '%s\n' \
             "CityBeach Frankfurt Demo" \
-            "URL: http://$CITY_HOST" \
+            "URL: https://$CITY_DOMAIN" \
+            "Fallback: http://$CITY_HOST" \
             "owner / $CITYBEACH_OWNER_PASSWORD" \
             "staff / $CITYBEACH_STAFF_PASSWORD" \
-            "customer / $CITYBEACH_CUSTOMER_PASSWORD" > /root/citybeach/.initial-credentials
-          chmod 600 /root/citybeach/.initial-credentials
-          printf '%s\n' \
-            'server {' \
-            '    listen 80;' \
-            "    server_name $CITY_HOST;" \
-            '    client_max_body_size 20M;' \
-            '    location / {' \
-            '        proxy_pass http://127.0.0.1:8022;' \
-            '        proxy_set_header Host $host;' \
-            '        proxy_set_header X-Real-IP $remote_addr;' \
-            '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
-            '        proxy_set_header X-Forwarded-Proto $scheme;' \
-            '    }' \
-            '}' > /etc/nginx/sites-available/citybeach
+            "customer / $CITYBEACH_CUSTOMER_PASSWORD" > "$APP_DIR/.initial-credentials"
+          chmod 600 "$APP_DIR/.initial-credentials"
+
+          if [ ! -f "/etc/letsencrypt/live/$CITY_DOMAIN/fullchain.pem" ]; then
+            cat >/etc/nginx/sites-available/citybeach <<NGINX
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+              server_name $CITY_DOMAIN $CITY_HOST _;
+              client_max_body_size 20M;
+
+              location / {
+                  proxy_pass http://127.0.0.1:8022;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+              }
+          }
+          NGINX
+          fi
+
+          rm -f /etc/nginx/sites-enabled/default
           ln -sfn /etc/nginx/sites-available/citybeach /etc/nginx/sites-enabled/citybeach
           nginx -t
           systemctl reload nginx
+
           for i in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:8022/health/ >/dev/null; then break; fi
             sleep 3
           done
           curl -fsS http://127.0.0.1:8022/health/
           REMOTE
+
       - name: Report deployment result
         if: always()
         env:
@@ -126,7 +164,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
-          BODY="CityBeach production deployment: **${JOB_STATUS}**%0A%0ACommit: \`${SHA}\`%0ARun: ${RUN_URL}%0ATarget: http://91.107.155.215"
+          BODY="CityBeach production deployment: **${JOB_STATUS}**%0A%0ACommit: \`${SHA}\`%0ARun: ${RUN_URL}%0ADomain: https://citybeach.smarbiz.sbs%0AFallback: http://91.107.155.215"
           curl -fsS -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
