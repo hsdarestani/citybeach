@@ -1,0 +1,18 @@
+{% extends 'cards/base.html' %}
+{% block title %}Apple-Konto verbinden · CityBeach Frankfurt{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="auth-shell">
+  <div class="auth-image"></div>
+  <div class="auth-card">
+    <span class="eyebrow">APPLE-KONTO VERBINDEN</span>
+    <h1>Fast geschafft.</h1>
+    <p>Bitte bestätige deine E-Mail-Adresse, damit wir dein CityBeach-Kundenkonto anlegen können.</p>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button class="primary full">Konto erstellen und fortfahren</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
