@@ -74,23 +74,66 @@ jobs:
       - name: SSH-Werkzeug installieren
         run: sudo apt-get update && sudo apt-get install -y sshpass
 
+      - name: Apple-Geheimnisse prüfen und normalisieren
+        env:
+          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_REDIRECT_URI_INPUT: ${{ secrets.APPLE_REDIRECT_URI }}
+          APPLE_PRIVATE_KEY_INPUT: ${{ secrets.APPLE_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_CLIENT_ID"
+          test -n "$APPLE_KEY_ID"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$APPLE_REDIRECT_URI_INPUT"
+          test -n "$APPLE_PRIVATE_KEY_INPUT"
+
+          NORMALIZED_REDIRECT="${APPLE_REDIRECT_URI_INPUT%/}/"
+          EXPECTED_REDIRECT="https://citybeach.smarbiz.sbs/accounts/apple/login/callback/"
+          test "$NORMALIZED_REDIRECT" = "$EXPECTED_REDIRECT" || {
+            echo 'APPLE_REDIRECT_URI stimmt nicht mit der CityBeach-Rücksprungadresse überein.'
+            exit 1
+          }
+
+          APPLE_PRIVATE_KEY_CANONICAL="$(python3 - <<'PY'
+          import base64
+          import os
+          import sys
+
+          value = os.environ.get('APPLE_PRIVATE_KEY_INPUT', '').strip().replace('\\n', '\n')
+          if '-----BEGIN PRIVATE KEY-----' in value:
+              private_key = value.encode()
+          else:
+              try:
+                  private_key = base64.b64decode(''.join(value.split()), validate=True)
+              except Exception:
+                  sys.exit('APPLE_PRIVATE_KEY_BASE64 ist weder ein gültiger .p8-Inhalt noch gültiges Base64.')
+          if b'-----BEGIN PRIVATE KEY-----' not in private_key or b'-----END PRIVATE KEY-----' not in private_key:
+              sys.exit('Der Apple-Schlüssel enthält keinen gültigen privaten Schlüssel.')
+          print(base64.b64encode(private_key).decode())
+          PY
+          )"
+
+          echo "APPLE_PRIVATE_KEY_CANONICAL=$APPLE_PRIVATE_KEY_CANONICAL" >> "$GITHUB_ENV"
+          echo "APPLE_REDIRECT_URI_NORMALIZED=$NORMALIZED_REDIRECT" >> "$GITHUB_ENV"
+
       - name: Auf Hetzner bereitstellen
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
           DOMAIN: citybeach.smarbiz.sbs
-          APPLE_SERVICE_ID: ${{ secrets.APPLE_SERVICE_ID }}
-          APPLE_BUNDLE_ID: ${{ secrets.APPLE_BUNDLE_ID }}
+          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
           APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_PRIVATE_KEY_B64: ${{ secrets.APPLE_PRIVATE_KEY_B64 }}
         run: |
+          set -euo pipefail
           test -n "$HOST" && test -n "$PASS"
           sshpass -p "$PASS" ssh \
             -o ConnectTimeout=15 \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
-            root@"$HOST" "CITY_HOST='$HOST' CITY_DOMAIN='$DOMAIN' APPLE_SERVICE_ID='$APPLE_SERVICE_ID' APPLE_BUNDLE_ID='$APPLE_BUNDLE_ID' APPLE_KEY_ID='$APPLE_KEY_ID' APPLE_TEAM_ID='$APPLE_TEAM_ID' APPLE_PRIVATE_KEY_B64='$APPLE_PRIVATE_KEY_B64' bash -s" <<'REMOTE'
+            root@"$HOST" "CITY_HOST='$HOST' CITY_DOMAIN='$DOMAIN' APPLE_CLIENT_ID='$APPLE_CLIENT_ID' APPLE_KEY_ID='$APPLE_KEY_ID' APPLE_TEAM_ID='$APPLE_TEAM_ID' APPLE_REDIRECT_URI='$APPLE_REDIRECT_URI_NORMALIZED' APPLE_PRIVATE_KEY_BASE64='$APPLE_PRIVATE_KEY_CANONICAL' bash -s" <<'REMOTE'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
 
@@ -140,16 +183,20 @@ jobs:
             fi
           }
 
+          sed -i '/^APPLE_SERVICE_ID=/d; /^APPLE_PRIVATE_KEY_B64=/d' "$ENV_FILE"
           set_env DJANGO_ALLOWED_HOSTS "$CITY_DOMAIN,$CITY_HOST,127.0.0.1,localhost"
           set_env DJANGO_CSRF_TRUSTED_ORIGINS "https://$CITY_DOMAIN,http://$CITY_HOST"
-          set_env APPLE_SERVICE_ID "$APPLE_SERVICE_ID"
-          set_env APPLE_BUNDLE_ID "$APPLE_BUNDLE_ID"
+          set_env DJANGO_SECURE_COOKIES "1"
+          set_env DJANGO_HSTS_SECONDS "31536000"
+          set_env APPLE_CLIENT_ID "$APPLE_CLIENT_ID"
           set_env APPLE_KEY_ID "$APPLE_KEY_ID"
           set_env APPLE_TEAM_ID "$APPLE_TEAM_ID"
-          set_env APPLE_PRIVATE_KEY_B64 "$APPLE_PRIVATE_KEY_B64"
+          set_env APPLE_REDIRECT_URI "$APPLE_REDIRECT_URI"
+          set_env APPLE_PRIVATE_KEY_BASE64 "$APPLE_PRIVATE_KEY_BASE64"
 
           docker compose up -d --build --remove-orphans
           docker compose exec -T web python manage.py seed_demo
+          docker compose exec -T web python manage.py shell -c "from django.conf import settings; assert settings.APPLE_LOGIN_ENABLED; assert settings.APPLE_REDIRECT_URI == 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'; assert 'BEGIN PRIVATE KEY' in settings.APPLE_PRIVATE_KEY"
 
           set -a
           . "$ENV_FILE"
@@ -163,36 +210,29 @@ jobs:
             "Kunde: customer / $CITYBEACH_CUSTOMER_PASSWORD" > "$APP_DIR/.initial-credentials"
           chmod 600 "$APP_DIR/.initial-credentials"
 
-          if [ ! -f "/etc/letsencrypt/live/$CITY_DOMAIN/fullchain.pem" ]; then
-            cat >/etc/nginx/sites-available/citybeach <<NGINX
-          server {
-              listen 80 default_server;
-              listen [::]:80 default_server;
-              server_name $CITY_DOMAIN $CITY_HOST _;
-              client_max_body_size 20M;
-
-              location / {
-                  proxy_pass http://127.0.0.1:8022;
-                  proxy_set_header Host \$host;
-                  proxy_set_header X-Real-IP \$remote_addr;
-                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto \$scheme;
-              }
-          }
-          NGINX
-          fi
-
-          rm -f /etc/nginx/sites-enabled/default
+          rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/citybeach-public
           ln -sfn /etc/nginx/sites-available/citybeach /etc/nginx/sites-enabled/citybeach
           nginx -t
           systemctl reload nginx
 
-          for i in $(seq 1 20); do
+          for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8022/health/ >/dev/null; then break; fi
             sleep 3
           done
           curl -fsS http://127.0.0.1:8022/health/
           REMOTE
+
+      - name: Apple-Anmeldung öffentlich prüfen
+        env:
+          DOMAIN: citybeach.smarbiz.sbs
+        run: |
+          set -euo pipefail
+          curl -fsS "https://$DOMAIN/accounts/login/" | grep -q 'Mit Apple fortfahren'
+          APPLE_LOCATION="$(curl -sS -D - -o /dev/null "https://$DOMAIN/accounts/apple/login/" | tr -d '\r' | awk '/^location:/I {print $2; exit}')"
+          case "$APPLE_LOCATION" in
+            https://appleid.apple.com/*) ;;
+            *) echo 'Die Apple-Anmeldung leitet nicht zu Apple weiter.'; exit 1 ;;
+          esac
 
       - name: Ergebnis melden
         if: always()
@@ -202,7 +242,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
-          BODY="CityBeach-Bereitstellung: **${JOB_STATUS}**%0A%0AStand: \`${SHA}\`%0AAusführung: ${RUN_URL}%0ADomain: https://citybeach.smarbiz.sbs%0AErsatzadresse: http://91.107.155.215"
+          BODY="CityBeach-Bereitstellung mit Apple-Anmeldung: **${JOB_STATUS}**%0A%0AStand: \`${SHA}\`%0AAusführung: ${RUN_URL}%0ADomain: https://citybeach.smarbiz.sbs"
           curl -fsS -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \

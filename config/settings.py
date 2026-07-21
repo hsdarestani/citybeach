@@ -10,16 +10,44 @@ DEBUG = os.getenv('DJANGO_DEBUG', '0') == '1'
 ALLOWED_HOSTS = [x.strip() for x in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if x.strip()]
 CSRF_TRUSTED_ORIGINS = [x.strip() for x in os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if x.strip()]
 
-APPLE_SERVICE_ID = os.getenv('APPLE_SERVICE_ID', '').strip()
+# Apple-Anmeldung. Die neuen Variablennamen entsprechen den GitHub-Geheimnissen.
+# Die bisherigen Namen bleiben als Rückwärtskompatibilität erhalten.
+APPLE_CLIENT_ID = os.getenv('APPLE_CLIENT_ID', os.getenv('APPLE_SERVICE_ID', '')).strip()
 APPLE_BUNDLE_ID = os.getenv('APPLE_BUNDLE_ID', '').strip()
 APPLE_KEY_ID = os.getenv('APPLE_KEY_ID', '').strip()
 APPLE_TEAM_ID = os.getenv('APPLE_TEAM_ID', '').strip()
-APPLE_PRIVATE_KEY_B64 = os.getenv('APPLE_PRIVATE_KEY_B64', '').strip()
-try:
-    APPLE_PRIVATE_KEY = base64.b64decode(APPLE_PRIVATE_KEY_B64).decode('utf-8') if APPLE_PRIVATE_KEY_B64 else ''
-except (ValueError, UnicodeDecodeError):
-    APPLE_PRIVATE_KEY = ''
-APPLE_LOGIN_ENABLED = all([APPLE_SERVICE_ID, APPLE_KEY_ID, APPLE_TEAM_ID, APPLE_PRIVATE_KEY])
+APPLE_REDIRECT_URI = os.getenv(
+    'APPLE_REDIRECT_URI',
+    'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/',
+).strip()
+APPLE_PRIVATE_KEY_VALUE = os.getenv(
+    'APPLE_PRIVATE_KEY_BASE64',
+    os.getenv('APPLE_PRIVATE_KEY_B64', ''),
+).strip()
+
+
+def _decode_apple_private_key(value):
+    """Akzeptiert sowohl den rohen .p8-Inhalt als auch Base64."""
+    if not value:
+        return ''
+    normalized = value.replace('\\n', '\n').strip()
+    if '-----BEGIN PRIVATE KEY-----' in normalized:
+        return normalized
+    try:
+        decoded = base64.b64decode(''.join(normalized.split()), validate=True).decode('utf-8').strip()
+    except (ValueError, UnicodeDecodeError):
+        return ''
+    return decoded if '-----BEGIN PRIVATE KEY-----' in decoded else ''
+
+
+APPLE_PRIVATE_KEY = _decode_apple_private_key(APPLE_PRIVATE_KEY_VALUE)
+APPLE_LOGIN_ENABLED = all([
+    APPLE_CLIENT_ID,
+    APPLE_KEY_ID,
+    APPLE_TEAM_ID,
+    APPLE_PRIVATE_KEY,
+    APPLE_REDIRECT_URI,
+])
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -102,7 +130,7 @@ SOCIALACCOUNT_ADAPTER = 'cards.adapters.CityBeachSocialAccountAdapter'
 SOCIALACCOUNT_PROVIDERS = {}
 if APPLE_LOGIN_ENABLED:
     apple_apps = [{
-        'client_id': APPLE_SERVICE_ID,
+        'client_id': APPLE_CLIENT_ID,
         'secret': APPLE_KEY_ID,
         'key': APPLE_TEAM_ID,
         'settings': {'certificate_key': APPLE_PRIVATE_KEY},
