@@ -225,14 +225,51 @@ jobs:
       - name: Apple-Anmeldung öffentlich prüfen
         env:
           DOMAIN: citybeach.smarbiz.sbs
+          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
+          APPLE_REDIRECT_URI: ${{ secrets.APPLE_REDIRECT_URI }}
         run: |
           set -euo pipefail
-          curl -fsS "https://$DOMAIN/accounts/login/" | grep -q 'Mit Apple fortfahren'
-          APPLE_LOCATION="$(curl -sS -D - -o /dev/null "https://$DOMAIN/accounts/apple/login/" | tr -d '\r' | awk '/^location:/I {print $2; exit}')"
-          case "$APPLE_LOCATION" in
-            https://appleid.apple.com/*) ;;
-            *) echo 'Die Apple-Anmeldung leitet nicht zu Apple weiter.'; exit 1 ;;
-          esac
+          python3 - <<'PY'
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          domain = os.environ['DOMAIN']
+          client_id = os.environ['APPLE_CLIENT_ID']
+          redirect_uri = os.environ['APPLE_REDIRECT_URI'].rstrip('/') + '/'
+
+          login_html = urllib.request.urlopen(
+              f'https://{domain}/accounts/login/', timeout=30
+          ).read().decode('utf-8', errors='replace')
+          assert 'Mit Apple fortfahren' in login_html
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect)
+          request = urllib.request.Request(
+              f'https://{domain}/accounts/apple/login/',
+              headers={'User-Agent': 'CityBeach-Bereitstellungsprüfung'},
+          )
+          try:
+              response = opener.open(request, timeout=30)
+              location = response.headers.get('Location', '')
+          except urllib.error.HTTPError as exc:
+              if exc.code not in (301, 302, 303, 307, 308):
+                  raise
+              location = exc.headers.get('Location', '')
+
+          parsed = urllib.parse.urlparse(location)
+          assert parsed.scheme == 'https'
+          assert parsed.netloc == 'appleid.apple.com'
+          assert parsed.path.startswith('/auth/authorize')
+          query = urllib.parse.parse_qs(parsed.query)
+          assert query.get('client_id', [''])[0] == client_id
+          assert query.get('redirect_uri', [''])[0] == redirect_uri
+          print('APPLE_AUTHORIZATION_OK=1')
+          PY
 
       - name: Ergebnis melden
         if: always()
@@ -242,9 +279,29 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
-          BODY="CityBeach-Bereitstellung mit Apple-Anmeldung: **${JOB_STATUS}**%0A%0AStand: \`${SHA}\`%0AAusführung: ${RUN_URL}%0ADomain: https://citybeach.smarbiz.sbs"
-          curl -fsS -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/2/comments" \
-            -d "{\"body\":\"${BODY}\"}"
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          successful = os.environ['JOB_STATUS'] == 'success'
+          body = (
+              '## CityBeach Produktionsstatus\n\n'
+              f"- Bereitstellung: **{'erfolgreich' if successful else 'fehlgeschlagen'}**\n"
+              f"- Apple-Anmeldung: **{'verbunden und geprüft' if successful else 'nicht bestätigt'}**\n"
+              f"- Stand: `{os.environ['SHA']}`\n"
+              f"- Ausführung: {os.environ['RUN_URL']}\n"
+              '- Adresse: https://citybeach.smarbiz.sbs\n'
+          )
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/2",
+              data=json.dumps({'body': body}).encode(),
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+              },
+              method='PATCH',
+          )
+          urllib.request.urlopen(request).read()
+          PY
