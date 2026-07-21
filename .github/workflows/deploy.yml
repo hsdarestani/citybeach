@@ -28,10 +28,37 @@ jobs:
           python manage.py makemigrations --check --dry-run
           python manage.py migrate --noinput
       - name: Automatische Prüfungen ausführen
+        id: tests
+        continue-on-error: true
         env:
           DJANGO_DEBUG: '1'
           DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
-        run: python manage.py test -v 2
+        run: python manage.py test -v 2 2>&1 | tee /tmp/citybeach-tests.log
+      - name: Fehlerausgabe im Pull Request veröffentlichen
+        if: steps.tests.outcome == 'failure' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, urllib.request
+          lines = pathlib.Path('/tmp/citybeach-tests.log').read_text(errors='replace').splitlines()[-120:]
+          body = '### Fehlgeschlagene automatische Prüfung\n\n```text\n' + '\n'.join(lines) + '\n```'
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments",
+              data=json.dumps({'body': body}).encode(),
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+              },
+              method='POST',
+          )
+          urllib.request.urlopen(request).read()
+          PY
+      - name: Prüfung bei Fehler beenden
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
       - name: Statische Dateien sammeln
         env:
           DJANGO_DEBUG: '1'
