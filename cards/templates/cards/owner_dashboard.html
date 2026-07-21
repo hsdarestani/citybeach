@@ -3,13 +3,20 @@
 {% block content %}
 <section class="app-head">
   <div><span class="eyebrow">CITYBEACH-STEUERZENTRALE</span><h1>Übersicht für den Inhaber</h1><p>Guthabenkonten, Zahlungen, Angebote und Mitarbeiter für CityBeach und CityAlm.</p></div>
-  <a class="primary" href="{% url 'owner_content' %}">Anwendung & Inhalte</a>
+  <div class="button-row"><button id="openOwnerScanner" class="secondary" type="button">QR-Code scannen</button><a class="primary" href="{% url 'owner_content' %}">Anwendung & Inhalte</a></div>
 </section>
 <section class="stats">
   <article><small>MITGLIEDER</small><strong>{{ wallet_count }}</strong></article>
   <article><small>GUTHABEN</small><strong>{{ total_balance|floatformat:2 }} €</strong></article>
   <article><small>BEREICHE</small><strong>{{ venues|length }}</strong></article>
   <article><small>ANGEBOTE</small><strong>{{ offers|length }}</strong></article>
+</section>
+<section id="ownerScannerPanel" class="panel" hidden>
+  <div class="panel-head"><div><span class="eyebrow">MITGLIEDERKARTE</span><h2>Mitglied per QR-Code öffnen</h2><p class="muted">Kamera auf den QR-Code der digitalen Mitgliedskarte richten.</p></div><button id="closeOwnerScanner" class="secondary" type="button">Schließen</button></div>
+  <div class="staff-layout">
+    <article class="scanner-panel"><div id="ownerQrReader" class="scanner"></div><button id="startOwnerScanner" class="primary full" type="button">Kamera starten</button><p id="ownerScannerStatus" class="muted">Nach dem Scan wird die Kundenseite automatisch geöffnet.</p></article>
+    <article class="panel"><h3>Kartencode manuell eingeben</h3><form method="get" action="{% url 'owner_wallet_scan' %}" class="form-grid"><p><label for="ownerToken">QR- oder Kartencode</label><input id="ownerToken" name="token" autocomplete="off" placeholder="Kartencode einfügen" required></p><button class="secondary full" type="submit">Mitglied öffnen</button></form></article>
+  </div>
 </section>
 <section class="owner-grid">
   <article class="panel">
@@ -25,4 +32,65 @@
   <h2>Letzte Guthabenbewegungen</h2>
   {% for entry in recent %}<a class="transaction" href="{% url 'receipt' entry.id %}"><span>{{ entry.wallet.display_name }}<small>{{ entry.venue.name|default:'Allgemein' }} · {{ entry.get_entry_type_display }}</small></span><b>{{ entry.amount|floatformat:2 }} €</b></a>{% empty %}<p class="muted">Noch keine Guthabenbewegungen vorhanden.</p>{% endfor %}
 </section>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(() => {
+  const panel = document.getElementById('ownerScannerPanel');
+  const openButton = document.getElementById('openOwnerScanner');
+  const closeButton = document.getElementById('closeOwnerScanner');
+  const startButton = document.getElementById('startOwnerScanner');
+  const status = document.getElementById('ownerScannerStatus');
+  const endpoint = "{% url 'owner_wallet_scan' %}";
+  let scanner = null;
+  let running = false;
+
+  const stopScanner = async () => {
+    if (scanner && running) {
+      try { await scanner.stop(); } catch (error) {}
+      running = false;
+    }
+  };
+
+  openButton?.addEventListener('click', () => {
+    panel.hidden = false;
+    panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+  });
+
+  closeButton?.addEventListener('click', async () => {
+    await stopScanner();
+    panel.hidden = true;
+  });
+
+  startButton?.addEventListener('click', async () => {
+    if (typeof Html5Qrcode === 'undefined') {
+      status.textContent = 'Der QR-Scanner konnte nicht geladen werden. Bitte den Kartencode manuell eingeben.';
+      return;
+    }
+    if (running) return;
+    status.textContent = 'Kamera wird geöffnet …';
+    scanner = scanner || new Html5Qrcode('ownerQrReader');
+    try {
+      await scanner.start(
+        {facingMode: 'environment'},
+        {fps: 10, qrbox: {width: 240, height: 240}},
+        async decodedText => {
+          status.textContent = 'QR-Code erkannt. Mitglied wird geöffnet …';
+          await stopScanner();
+          window.location.assign(endpoint + '?token=' + encodeURIComponent(decodedText));
+        },
+        () => {}
+      );
+      running = true;
+      startButton.textContent = 'Scanner aktiv';
+      status.textContent = 'QR-Code in den markierten Bereich halten.';
+    } catch (error) {
+      status.textContent = 'Kamera nicht verfügbar. Bitte Berechtigung prüfen oder den Kartencode manuell eingeben.';
+    }
+  });
+
+  window.addEventListener('pagehide', stopScanner);
+})();
+</script>
 {% endblock %}
