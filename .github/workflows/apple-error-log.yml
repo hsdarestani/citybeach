@@ -1,0 +1,32 @@
+name: Apple-Fehlerprotokoll prüfen
+
+on:
+  pull_request:
+
+jobs:
+  traceback:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH-Werkzeug installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Apple-Fehler auslösen und Django-Protokoll lesen
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        run: |
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /root/citybeach
+          curl -sS -o /dev/null \
+            -H 'Host: citybeach.smarbiz.sbs' \
+            -H 'X-Forwarded-Proto: https' \
+            http://127.0.0.1:8022/accounts/apple/login/ || true
+          sleep 1
+          docker compose logs --tail=120 web 2>&1 | sed -E 's/(APPLE_PRIVATE_KEY[^=]*=).*/\1[REDACTED]/g'
+          REMOTE
