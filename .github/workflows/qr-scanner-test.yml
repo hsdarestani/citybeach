@@ -1,0 +1,19 @@
+name: QR-Scanner einzeln prüfen
+
+on:
+  pull_request:
+
+jobs:
+  qr-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: QR-Scanner-Tests
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py test cards.tests.OwnerQrScannerTests -v 2
