@@ -20,10 +20,24 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Check public DNS
+        id: dns
+        env:
+          DOMAIN: citybeach.smarbiz.sbs
+        run: |
+          if getent ahostsv4 "$DOMAIN" >/dev/null 2>&1; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "$DOMAIN is not published in DNS yet."
+          fi
+
       - name: Install SSH client
+        if: steps.dns.outputs.ready == 'true'
         run: sudo apt-get update && sudo apt-get install -y sshpass
 
       - name: Configure domain, Nginx and SSL
+        if: steps.dns.outputs.ready == 'true'
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
@@ -39,7 +53,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
 
           apt-get update
-          apt-get install -y nginx certbot python3-certbot-nginx curl dnsutils
+          apt-get install -y nginx certbot python3-certbot-nginx curl
           systemctl enable --now nginx
 
           if command -v ufw >/dev/null 2>&1; then
@@ -47,17 +61,14 @@ jobs:
             ufw allow 80/tcp || true
             ufw allow 443/tcp || true
           fi
-          iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
-          iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT
 
           APP_DIR=/root/citybeach
           ENV_FILE="$APP_DIR/.env"
-          mkdir -p "$APP_DIR"
 
           set_env() {
             key="$1"
             value="$2"
-            if [ -f "$ENV_FILE" ] && grep -q "^${key}=" "$ENV_FILE"; then
+            if grep -q "^${key}=" "$ENV_FILE"; then
               sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
             else
               printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
@@ -89,26 +100,19 @@ jobs:
           nginx -t
           systemctl reload nginx
 
-          if ! getent ahostsv4 "$CITY_DOMAIN" >/dev/null 2>&1; then
-            echo "DNS_WAITING: $CITY_DOMAIN does not resolve yet"
-            exit 0
-          fi
-
           certbot --nginx \
             --non-interactive \
             --agree-tos \
             --register-unsafely-without-email \
             --redirect \
+            --keep-until-expiring \
             -d "$CITY_DOMAIN"
 
           set_env DJANGO_SECURE_COOKIES "1"
           set_env DJANGO_HSTS_SECONDS "31536000"
 
           cd "$APP_DIR"
-          if [ -f docker-compose.yml ]; then
-            docker compose up -d --force-recreate web
-          fi
-
+          docker compose up -d --force-recreate web
           curl -fsS --retry 10 --retry-delay 3 "https://$CITY_DOMAIN/health/"
           REMOTE
 
@@ -116,11 +120,14 @@ jobs:
         id: verify
         env:
           DOMAIN: citybeach.smarbiz.sbs
+          DNS_READY: ${{ steps.dns.outputs.ready }}
         run: |
-          if curl -fsS --connect-timeout 10 --max-time 20 --retry 3 --retry-delay 5 "https://${DOMAIN}/health/"; then
+          if [ "$DNS_READY" != "true" ]; then
+            echo "state=waiting-for-dns" >> "$GITHUB_OUTPUT"
+          elif curl -fsS --connect-timeout 10 --max-time 20 --retry 3 --retry-delay 5 "https://${DOMAIN}/health/"; then
             echo "state=success" >> "$GITHUB_OUTPUT"
           else
-            echo "state=waiting-for-dns" >> "$GITHUB_OUTPUT"
+            echo "state=ssl-pending" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Report domain status
