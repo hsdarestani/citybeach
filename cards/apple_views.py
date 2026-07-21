@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.http import HttpRequest
+from django.views.decorators.csrf import csrf_exempt
 
+from allauth.account.internal.decorators import login_not_required
 from allauth.socialaccount.providers.apple.views import (
     AppleOAuth2Adapter,
     apple_post_callback,
@@ -22,6 +24,8 @@ apple_login = OAuth2LoginView.adapter_view(CityBeachAppleOAuth2Adapter)
 apple_finish_login = OAuth2CallbackView.adapter_view(CityBeachAppleOAuth2Adapter)
 
 
+@csrf_exempt
+@login_not_required
 def apple_callback(request: HttpRequest):
     return apple_post_callback(
         request,
