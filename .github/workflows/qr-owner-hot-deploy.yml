@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   deploy:
@@ -56,3 +57,38 @@ jobs:
             sleep 3
           done
           exit 1
+      - name: Ergebnis melden
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          successful = os.environ['JOB_STATUS'] == 'success'
+          body = (
+              '## CityBeach Produktionsstatus\n\n'
+              f"- Bereitstellung: **{'erfolgreich' if successful else 'fehlgeschlagen'}**\n"
+              f"- Inhaber-QR-Scanner: **{'aktiv und geprüft' if successful else 'nicht bestätigt'}**\n"
+              '- Bestehende Apple-Konfiguration und Datenbank: **unverändert**\n'
+              f"- Stand: `{os.environ['SHA']}`\n"
+              f"- Ausführung: {os.environ['RUN_URL']}\n"
+              '- Adresse: https://citybeach.smarbiz.sbs\n'
+          )
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/2",
+              data=json.dumps({'body': body}).encode(),
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+              },
+              method='PATCH',
+          )
+          urllib.request.urlopen(request).read()
+          PY
