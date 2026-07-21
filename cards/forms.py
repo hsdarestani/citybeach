@@ -9,8 +9,8 @@ from .models import BusinessSettings, CustomerProfile, Offer, Venue, Wallet
 
 def validate_adult(birth_date):
     today = date.today()
-    eighteenth_birthday = birth_date.replace(year=birth_date.year + 18)
-    if eighteenth_birthday > today:
+    age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+    if age < 18:
         raise forms.ValidationError('Du musst mindestens 18 Jahre alt sein.')
     return birth_date
 
