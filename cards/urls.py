@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api_views, views
+from . import api_views, owner_scan, views
 
 urlpatterns = [
     path('', views.landing, name='landing'),
@@ -14,6 +14,7 @@ urlpatterns = [
     path('staff/', views.staff_dashboard, name='staff_dashboard'),
     path('owner/', views.owner_dashboard, name='owner_dashboard'),
     path('owner/content/', views.owner_content, name='owner_content'),
+    path('owner/wallet/scan/', owner_scan.owner_wallet_scan, name='owner_wallet_scan'),
     path('owner/wallet/<uuid:wallet_id>/', views.wallet_detail, name='wallet_detail'),
     path('owner/wallet/<uuid:wallet_id>/toggle/', views.toggle_wallet, name='toggle_wallet'),
     path('receipt/<uuid:entry_id>/', views.receipt, name='receipt'),
