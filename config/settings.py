@@ -18,7 +18,7 @@ APPLE_KEY_ID = os.getenv('APPLE_KEY_ID', '').strip()
 APPLE_TEAM_ID = os.getenv('APPLE_TEAM_ID', '').strip()
 APPLE_REDIRECT_URI = os.getenv(
     'APPLE_REDIRECT_URI',
-    'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/',
+    'https://citybeach.smarbiz.sbs/accounts/apple/callback/',
 ).strip()
 APPLE_PRIVATE_KEY_VALUE = os.getenv(
     'APPLE_PRIVATE_KEY_BASE64',
