@@ -66,4 +66,4 @@ Die Rücksprungadresse muss exakt lauten:
 https://citybeach.smarbiz.sbs/accounts/apple/login/callback/
 ```
 
-Bei jeder Produktionsbereitstellung werden die interne Apple-Konfiguration, die sichtbare Schaltfläche „Mit Apple fortfahren“ und die Weiterleitung zu `appleid.apple.com` automatisch geprüft.
+Bei jeder Produktionsbereitstellung werden die interne Apple-Konfiguration, die sichtbare Schaltfläche „Mit Apple fortfahren“, die verwendete Client-ID und die Rücksprungadresse zur Apple-Anmeldeseite automatisch geprüft.
