@@ -1,0 +1,67 @@
+name: Apple-SocialApp-Fix bereitstellen
+
+on:
+  pull_request:
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH-Werkzeug installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Fix auf Production bereitstellen und Apple prüfen
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /root/citybeach
+          git fetch --depth 1 origin main
+          git reset --hard FETCH_HEAD
+          docker compose up -d --build --remove-orphans
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8022/health/ >/dev/null; then
+              break
+            fi
+            sleep 3
+          done
+          curl -fsS http://127.0.0.1:8022/health/
+
+          docker compose exec -T web python manage.py seed_demo
+          docker compose exec -T web python manage.py shell <<'PY'
+          import urllib.parse
+          from allauth.socialaccount.models import SocialApp
+          from django.conf import settings
+          from django.test import Client
+
+          assert settings.APPLE_LOGIN_ENABLED
+          app = SocialApp.objects.get(provider='apple', client_id=settings.APPLE_CLIENT_ID)
+          assert app.sites.filter(pk=settings.SITE_ID).exists()
+          assert app.secret == settings.APPLE_KEY_ID
+          assert app.key == settings.APPLE_TEAM_ID
+          assert 'BEGIN PRIVATE KEY' in app.settings.get('certificate_key', '')
+
+          client = Client(raise_request_exception=True, HTTP_HOST='citybeach.smarbiz.sbs')
+          response = client.get('/accounts/apple/login/', secure=True)
+          assert response.status_code in (301, 302, 303, 307, 308)
+          location = response.headers['Location']
+          parsed = urllib.parse.urlparse(location)
+          query = urllib.parse.parse_qs(parsed.query)
+          assert parsed.scheme == 'https'
+          assert parsed.netloc == 'appleid.apple.com'
+          assert parsed.path.startswith('/auth/authorize')
+          assert query.get('client_id', [''])[0] == settings.APPLE_CLIENT_ID
+          assert query.get('redirect_uri', [''])[0] == 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'
+          print('APPLE_SOCIALAPP_OK=1')
+          print('APPLE_REDIRECT_OK=1')
+          PY
+          REMOTE
