@@ -1,0 +1,118 @@
+name: Test and Deploy CityBeach
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Migration check
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: |
+          python manage.py makemigrations --check --dry-run
+          python manage.py migrate --noinput
+      - name: Tests
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py test -v 2
+      - name: Static files
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py collectstatic --noinput
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Deploy to Hetzner
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        run: |
+          test -n "$HOST" && test -n "$PASS"
+          sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" "CITY_HOST='$HOST' bash -s" <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y git curl docker.io docker-compose-v2 nginx openssl
+          systemctl enable --now docker nginx
+          mkdir -p /root/citybeach
+          cd /root/citybeach
+          if [ ! -d .git ]; then
+            git init
+            git remote add origin https://github.com/hsdarestani/citybeach.git
+          fi
+          git fetch --depth 1 origin main
+          git reset --hard FETCH_HEAD
+          if [ ! -f .env ]; then
+            DJANGO_KEY="$(openssl rand -base64 48 | tr -d '\n')"
+            DB_PASSWORD="$(openssl rand -hex 24)"
+            OWNER_PASSWORD="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9@!_-')"
+            STAFF_PASSWORD="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9@!_-')"
+            CUSTOMER_PASSWORD="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9@!_-')"
+            printf '%s\n' \
+              "DJANGO_SECRET_KEY=$DJANGO_KEY" \
+              "DJANGO_DEBUG=0" \
+              "DJANGO_ALLOWED_HOSTS=$CITY_HOST,127.0.0.1,localhost" \
+              "DJANGO_CSRF_TRUSTED_ORIGINS=http://$CITY_HOST" \
+              "DJANGO_SECURE_COOKIES=0" \
+              "DATABASE_URL=postgresql://citybeach:$DB_PASSWORD@db:5432/citybeach" \
+              "POSTGRES_DB=citybeach" \
+              "POSTGRES_USER=citybeach" \
+              "POSTGRES_PASSWORD=$DB_PASSWORD" \
+              "APP_PORT=8022" \
+              "CITYBEACH_OWNER_PASSWORD=$OWNER_PASSWORD" \
+              "CITYBEACH_STAFF_PASSWORD=$STAFF_PASSWORD" \
+              "CITYBEACH_CUSTOMER_PASSWORD=$CUSTOMER_PASSWORD" > .env
+            chmod 600 .env
+          fi
+          docker compose up -d --build --remove-orphans
+          docker compose exec -T web python manage.py seed_demo
+          set -a
+          . ./.env
+          set +a
+          printf '%s\n' \
+            "CityBeach Frankfurt Demo" \
+            "URL: http://$CITY_HOST" \
+            "owner / $CITYBEACH_OWNER_PASSWORD" \
+            "staff / $CITYBEACH_STAFF_PASSWORD" \
+            "customer / $CITYBEACH_CUSTOMER_PASSWORD" > /root/citybeach/.initial-credentials
+          chmod 600 /root/citybeach/.initial-credentials
+          printf '%s\n' \
+            'server {' \
+            '    listen 80;' \
+            "    server_name $CITY_HOST;" \
+            '    client_max_body_size 20M;' \
+            '    location / {' \
+            '        proxy_pass http://127.0.0.1:8022;' \
+            '        proxy_set_header Host $host;' \
+            '        proxy_set_header X-Real-IP $remote_addr;' \
+            '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+            '        proxy_set_header X-Forwarded-Proto $scheme;' \
+            '    }' \
+            '}' > /etc/nginx/sites-available/citybeach
+          ln -sfn /etc/nginx/sites-available/citybeach /etc/nginx/sites-enabled/citybeach
+          nginx -t
+          systemctl reload nginx
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8022/health/ >/dev/null; then break; fi
+            sleep 3
+          done
+          curl -fsS http://127.0.0.1:8022/health/
+          REMOTE
