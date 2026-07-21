@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .forms import RegistrationForm
-from .models import Business, CustomerProfile, Venue, Wallet
+from .models import Business, CustomerProfile, Membership, Venue, Wallet
 
 
 class GermanInterfaceTests(TestCase):
@@ -78,3 +78,45 @@ class AppleProfileCompletionTests(TestCase):
         wallet = Wallet.objects.get(owner=self.user)
         self.assertEqual(profile.phone, '+49 170 2222222')
         self.assertEqual(wallet.phone, '+49 170 2222222')
+
+
+class OwnerQrScannerTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.business = Business.objects.create(name='CityBeach Frankfurt', slug='citybeach-frankfurt')
+        self.other_business = Business.objects.create(name='Andere Lounge', slug='andere-lounge')
+        self.owner = User.objects.create_user(username='owner-test', password='test-password')
+        self.staff = User.objects.create_user(username='staff-test', password='test-password')
+        Membership.objects.create(user=self.owner, business=self.business, role=Membership.Role.OWNER)
+        Membership.objects.create(user=self.staff, business=self.business, role=Membership.Role.STAFF)
+        self.wallet = Wallet.objects.create(business=self.business, display_name='QR Mitglied')
+        self.other_wallet = Wallet.objects.create(business=self.other_business, display_name='Fremdes Mitglied')
+
+    def test_owner_can_open_member_from_plain_qr_token(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse('owner_wallet_scan'), {'token': str(self.wallet.qr_token)})
+        self.assertRedirects(
+            response,
+            reverse('wallet_detail', kwargs={'wallet_id': self.wallet.pk}),
+            fetch_redirect_response=False,
+        )
+
+    def test_owner_can_open_member_from_qr_url(self):
+        self.client.force_login(self.owner)
+        qr_value = f'https://citybeach.smarbiz.sbs/app/?karte={self.wallet.qr_token}'
+        response = self.client.get(reverse('owner_wallet_scan'), {'token': qr_value})
+        self.assertRedirects(
+            response,
+            reverse('wallet_detail', kwargs={'wallet_id': self.wallet.pk}),
+            fetch_redirect_response=False,
+        )
+
+    def test_staff_cannot_use_owner_scanner(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('owner_wallet_scan'), {'token': str(self.wallet.qr_token)})
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_cannot_open_wallet_from_another_business(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse('owner_wallet_scan'), {'token': str(self.other_wallet.qr_token)})
+        self.assertRedirects(response, reverse('owner_dashboard'), fetch_redirect_response=False)
