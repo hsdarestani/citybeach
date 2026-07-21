@@ -1,0 +1,138 @@
+name: Configure CityBeach Domain
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: citybeach-domain-setup
+  cancel-in-progress: true
+
+jobs:
+  configure-domain:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Configure domain, Nginx and SSL
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+          DOMAIN: citybeach.smarbiz.sbs
+        run: |
+          test -n "$HOST" && test -n "$PASS"
+          sshpass -p "$PASS" ssh \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$HOST" "CITY_HOST='$HOST' CITY_DOMAIN='$DOMAIN' bash -s" <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+
+          apt-get update
+          apt-get install -y nginx certbot python3-certbot-nginx curl dnsutils
+          systemctl enable --now nginx
+
+          if command -v ufw >/dev/null 2>&1; then
+            ufw allow 22/tcp || true
+            ufw allow 80/tcp || true
+            ufw allow 443/tcp || true
+          fi
+          iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
+          iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT
+
+          APP_DIR=/root/citybeach
+          ENV_FILE="$APP_DIR/.env"
+          mkdir -p "$APP_DIR"
+
+          set_env() {
+            key="$1"
+            value="$2"
+            if [ -f "$ENV_FILE" ] && grep -q "^${key}=" "$ENV_FILE"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+            fi
+          }
+
+          set_env DJANGO_ALLOWED_HOSTS "$CITY_DOMAIN,$CITY_HOST,127.0.0.1,localhost"
+          set_env DJANGO_CSRF_TRUSTED_ORIGINS "https://$CITY_DOMAIN,http://$CITY_HOST"
+
+          cat >/etc/nginx/sites-available/citybeach <<NGINX
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+              server_name $CITY_DOMAIN $CITY_HOST _;
+              client_max_body_size 20M;
+
+              location / {
+                  proxy_pass http://127.0.0.1:8022;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+              }
+          }
+          NGINX
+
+          rm -f /etc/nginx/sites-enabled/default
+          ln -sfn /etc/nginx/sites-available/citybeach /etc/nginx/sites-enabled/citybeach
+          nginx -t
+          systemctl reload nginx
+
+          if ! getent ahostsv4 "$CITY_DOMAIN" >/dev/null 2>&1; then
+            echo "DNS_WAITING: $CITY_DOMAIN does not resolve yet"
+            exit 0
+          fi
+
+          certbot --nginx \
+            --non-interactive \
+            --agree-tos \
+            --register-unsafely-without-email \
+            --redirect \
+            -d "$CITY_DOMAIN"
+
+          set_env DJANGO_SECURE_COOKIES "1"
+          set_env DJANGO_HSTS_SECONDS "31536000"
+
+          cd "$APP_DIR"
+          if [ -f docker-compose.yml ]; then
+            docker compose up -d --force-recreate web
+          fi
+
+          curl -fsS --retry 10 --retry-delay 3 "https://$CITY_DOMAIN/health/"
+          REMOTE
+
+      - name: Verify public HTTPS
+        id: verify
+        env:
+          DOMAIN: citybeach.smarbiz.sbs
+        run: |
+          if curl -fsS --connect-timeout 10 --max-time 20 --retry 3 --retry-delay 5 "https://${DOMAIN}/health/"; then
+            echo "state=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=waiting-for-dns" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report domain status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE: ${{ steps.verify.outputs.state || 'failed' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          BODY="CityBeach domain setup: **${STATE}**%0A%0ADomain: https://citybeach.smarbiz.sbs%0ATarget IP: 91.107.155.215%0ARun: ${RUN_URL}"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/3/comments" \
+            -d "{\"body\":\"${BODY}\"}"
