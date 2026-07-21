@@ -1,4 +1,4 @@
-name: CityBeach testen und bereitstellen
+name: CityBeach prüfen und bereitstellen
 
 on:
   pull_request:
@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
   issues: write
+
+concurrency:
+  group: citybeach-production
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -20,15 +24,26 @@ jobs:
           cache: pip
       - name: Abhängigkeiten installieren
         run: pip install -r requirements.txt
-      - name: Anwendung prüfen
+      - name: Migrationen prüfen
         env:
           DJANGO_DEBUG: '1'
           DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
-        run: |
-          python manage.py makemigrations --check --dry-run
-          python manage.py migrate --noinput
-          python manage.py test -v 2
-          python manage.py collectstatic --noinput
+        run: python manage.py makemigrations --check --dry-run
+      - name: Migrationen anwenden
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py migrate --noinput
+      - name: Automatische Tests ausführen
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py test -v 2
+      - name: Statische Dateien sammeln
+        env:
+          DJANGO_DEBUG: '1'
+          DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+        run: python manage.py collectstatic --noinput
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -36,213 +51,71 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Bereitstellungswerkzeuge installieren
-        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: SSH-Werkzeug installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
 
-      - name: Apple-Anmeldung konfigurieren und bereitstellen
+      - name: Auf Hetzner bereitstellen und Apple prüfen
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
-          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
-          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_REDIRECT_URI_INPUT: ${{ secrets.APPLE_REDIRECT_URI }}
-          APPLE_PRIVATE_KEY_INPUT: ${{ secrets.APPLE_PRIVATE_KEY_BASE64 }}
-          DOMAIN: citybeach.smarbiz.sbs
         run: |
           set -euo pipefail
-          test -n "$HOST"
-          test -n "$PASS"
-          test -n "$APPLE_CLIENT_ID"
-          test -n "$APPLE_KEY_ID"
-          test -n "$APPLE_TEAM_ID"
-          test -n "$APPLE_REDIRECT_URI_INPUT"
-          test -n "$APPLE_PRIVATE_KEY_INPUT"
-
-          APPLE_REDIRECT_URI="${APPLE_REDIRECT_URI_INPUT%/}/"
-          EXPECTED_REDIRECT="https://$DOMAIN/accounts/apple/login/callback/"
-          test "$APPLE_REDIRECT_URI" = "$EXPECTED_REDIRECT" || {
-            echo 'APPLE_REDIRECT_URI stimmt nicht mit der CityBeach-Rücksprungadresse überein.'
-            exit 1
-          }
-
-          APPLE_PRIVATE_KEY_BASE64="$(python3 - <<'PY'
-          import base64
-          import os
-          import sys
-          import textwrap
-
-          value = os.environ.get('APPLE_PRIVATE_KEY_INPUT', '').strip().replace('\\n', '\n').lstrip('\ufeff')
-          if not value:
-              sys.exit('Der Apple-Schlüssel ist leer.')
-
-          if '-----BEGIN PRIVATE KEY-----' in value:
-              body = value.split('-----BEGIN PRIVATE KEY-----', 1)[1]
-              body = body.split('-----END PRIVATE KEY-----', 1)[0]
-              compact = ''.join(body.split())
-          else:
-              compact = ''.join(value.strip('"\' ').split())
-              try:
-                  decoded = base64.b64decode(compact, validate=True)
-              except Exception:
-                  sys.exit('Der Apple-Schlüssel hat kein unterstütztes Format.')
-              if b'-----BEGIN PRIVATE KEY-----' in decoded:
-                  text = decoded.decode('utf-8').lstrip('\ufeff')
-                  body = text.split('-----BEGIN PRIVATE KEY-----', 1)[1]
-                  body = body.split('-----END PRIVATE KEY-----', 1)[0]
-                  compact = ''.join(body.split())
-              elif not decoded.startswith(b'0'):
-                  sys.exit('Der Apple-Schlüssel ist kein gültiger PKCS#8-Schlüssel.')
-
-          try:
-              der = base64.b64decode(compact, validate=True)
-          except Exception:
-              sys.exit('Der Inhalt des Apple-Schlüssels ist kein gültiges Base64.')
-          if not der.startswith(b'0'):
-              sys.exit('Der Apple-Schlüssel besitzt keine gültige PKCS#8-Struktur.')
-
-          pem = (
-              '-----BEGIN PRIVATE KEY-----\n'
-              + '\n'.join(textwrap.wrap(compact, 64))
-              + '\n-----END PRIVATE KEY-----\n'
-          )
-          print(base64.b64encode(pem.encode()).decode())
-          PY
-          )"
-
-          printf '%s' "$APPLE_PRIVATE_KEY_BASE64" | base64 --decode > /tmp/AuthKey_CityBeach.p8
-          openssl pkey -in /tmp/AuthKey_CityBeach.p8 -noout >/dev/null
-          rm -f /tmp/AuthKey_CityBeach.p8
-
+          test -n "$HOST" && test -n "$PASS"
           sshpass -p "$PASS" ssh \
             -o ConnectTimeout=15 \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
-            root@"$HOST" "CITY_HOST='$HOST' CITY_DOMAIN='$DOMAIN' APPLE_CLIENT_ID='$APPLE_CLIENT_ID' APPLE_KEY_ID='$APPLE_KEY_ID' APPLE_TEAM_ID='$APPLE_TEAM_ID' APPLE_REDIRECT_URI='$APPLE_REDIRECT_URI' APPLE_PRIVATE_KEY_BASE64='$APPLE_PRIVATE_KEY_BASE64' bash -s" <<'REMOTE'
+            root@"$HOST" bash -s <<'REMOTE'
           set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
+          cd /root/citybeach
+          test -f .env
 
-          apt-get update
-          apt-get install -y git curl docker.io docker-compose-v2 nginx openssl
-          systemctl enable --now docker nginx
-
-          APP_DIR=/root/citybeach
-          ENV_FILE="$APP_DIR/.env"
-          mkdir -p "$APP_DIR"
-          cd "$APP_DIR"
-
-          if [ ! -d .git ]; then
-            git init
-            git remote add origin https://github.com/hsdarestani/citybeach.git
-          fi
           git fetch --depth 1 origin main
           git reset --hard FETCH_HEAD
-
-          if [ ! -f "$ENV_FILE" ]; then
-            DJANGO_KEY="$(openssl rand -base64 48 | tr -d '\n')"
-            DB_PASSWORD="$(openssl rand -hex 24)"
-            OWNER_PASSWORD="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9@!_-')"
-            STAFF_PASSWORD="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9@!_-')"
-            CUSTOMER_PASSWORD="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9@!_-')"
-            printf '%s\n' \
-              "DJANGO_SECRET_KEY=$DJANGO_KEY" \
-              "DJANGO_DEBUG=0" \
-              "DATABASE_URL=postgresql://citybeach:$DB_PASSWORD@db:5432/citybeach" \
-              "POSTGRES_DB=citybeach" \
-              "POSTGRES_USER=citybeach" \
-              "POSTGRES_PASSWORD=$DB_PASSWORD" \
-              "APP_PORT=8022" \
-              "CITYBEACH_OWNER_PASSWORD=$OWNER_PASSWORD" \
-              "CITYBEACH_STAFF_PASSWORD=$STAFF_PASSWORD" \
-              "CITYBEACH_CUSTOMER_PASSWORD=$CUSTOMER_PASSWORD" > "$ENV_FILE"
-            chmod 600 "$ENV_FILE"
-          fi
-
-          set_env() {
-            key="$1"
-            value="$2"
-            if grep -q "^${key}=" "$ENV_FILE"; then
-              sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
-            else
-              printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-            fi
-          }
-
-          sed -i '/^APPLE_SERVICE_ID=/d; /^APPLE_PRIVATE_KEY_B64=/d' "$ENV_FILE"
-          set_env DJANGO_ALLOWED_HOSTS "$CITY_DOMAIN,$CITY_HOST,127.0.0.1,localhost"
-          set_env DJANGO_CSRF_TRUSTED_ORIGINS "https://$CITY_DOMAIN,http://$CITY_HOST"
-          set_env DJANGO_SECURE_COOKIES "1"
-          set_env DJANGO_HSTS_SECONDS "31536000"
-          set_env APPLE_CLIENT_ID "$APPLE_CLIENT_ID"
-          set_env APPLE_KEY_ID "$APPLE_KEY_ID"
-          set_env APPLE_TEAM_ID "$APPLE_TEAM_ID"
-          set_env APPLE_REDIRECT_URI "$APPLE_REDIRECT_URI"
-          set_env APPLE_PRIVATE_KEY_BASE64 "$APPLE_PRIVATE_KEY_BASE64"
-
           docker compose up -d --build --remove-orphans
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8022/health/ >/dev/null; then
+              break
+            fi
+            sleep 3
+          done
+          curl -fsS http://127.0.0.1:8022/health/
+
           docker compose exec -T web python manage.py seed_demo
-          docker compose exec -T web python manage.py shell -c "from django.conf import settings; assert settings.APPLE_LOGIN_ENABLED; assert settings.APPLE_CLIENT_ID; assert settings.APPLE_REDIRECT_URI == 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'; assert 'BEGIN PRIVATE KEY' in settings.APPLE_PRIVATE_KEY"
+          docker compose exec -T web python manage.py shell <<'PY'
+          import urllib.parse
+          from allauth.socialaccount.models import SocialApp
+          from django.conf import settings
+          from django.test import Client
+
+          assert settings.APPLE_LOGIN_ENABLED
+          app = SocialApp.objects.get(provider='apple', client_id=settings.APPLE_CLIENT_ID)
+          assert app.sites.filter(pk=settings.SITE_ID).exists()
+          assert app.secret == settings.APPLE_KEY_ID
+          assert app.key == settings.APPLE_TEAM_ID
+          assert 'BEGIN PRIVATE KEY' in app.settings.get('certificate_key', '')
+
+          client = Client(raise_request_exception=True, HTTP_HOST='citybeach.smarbiz.sbs')
+          response = client.get('/accounts/apple/login/', secure=True)
+          assert response.status_code in (301, 302, 303, 307, 308)
+          parsed = urllib.parse.urlparse(response.headers['Location'])
+          query = urllib.parse.parse_qs(parsed.query)
+          assert parsed.scheme == 'https'
+          assert parsed.netloc == 'appleid.apple.com'
+          assert parsed.path.startswith('/auth/authorize')
+          assert query.get('client_id', [''])[0] == settings.APPLE_CLIENT_ID
+          assert query.get('redirect_uri', [''])[0] == 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'
+          print('CITYBEACH_APPLE_OK=1')
+          PY
 
           rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/citybeach-public
           ln -sfn /etc/nginx/sites-available/citybeach /etc/nginx/sites-enabled/citybeach
           nginx -t
           systemctl reload nginx
-
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8022/health/ >/dev/null; then break; fi
-            sleep 3
-          done
-          curl -fsS http://127.0.0.1:8022/health/
           REMOTE
 
-      - name: Apple-Anmeldung öffentlich prüfen
-        env:
-          DOMAIN: citybeach.smarbiz.sbs
-          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
-          APPLE_REDIRECT_URI: ${{ secrets.APPLE_REDIRECT_URI }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os
-          import urllib.error
-          import urllib.parse
-          import urllib.request
-
-          domain = os.environ['DOMAIN']
-          client_id = os.environ['APPLE_CLIENT_ID']
-          redirect_uri = os.environ['APPLE_REDIRECT_URI'].rstrip('/') + '/'
-
-          html = urllib.request.urlopen(f'https://{domain}/accounts/login/', timeout=30).read().decode('utf-8', errors='replace')
-          assert 'Mit Apple fortfahren' in html
-
-          class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self, req, fp, code, msg, headers, newurl):
-                  return None
-
-          opener = urllib.request.build_opener(NoRedirect)
-          request = urllib.request.Request(
-              f'https://{domain}/accounts/apple/login/',
-              headers={'User-Agent': 'CityBeach-Bereitstellungsprüfung'},
-          )
-          try:
-              response = opener.open(request, timeout=30)
-              location = response.headers.get('Location', '')
-          except urllib.error.HTTPError as exc:
-              if exc.code not in (301, 302, 303, 307, 308):
-                  raise
-              location = exc.headers.get('Location', '')
-
-          parsed = urllib.parse.urlparse(location)
-          query = urllib.parse.parse_qs(parsed.query)
-          assert parsed.scheme == 'https'
-          assert parsed.netloc == 'appleid.apple.com'
-          assert parsed.path.startswith('/auth/authorize')
-          assert query.get('client_id', [''])[0] == client_id
-          assert query.get('redirect_uri', [''])[0] == redirect_uri
-          print('APPLE_AUTHORIZATION_OK=1')
-          PY
-
-      - name: Ergebnis melden
+      - name: Produktionsstatus aktualisieren
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -255,11 +128,11 @@ jobs:
           import os
           import urllib.request
 
-          successful = os.environ['JOB_STATUS'] == 'success'
+          success = os.environ['JOB_STATUS'] == 'success'
           body = (
               '## CityBeach Produktionsstatus\n\n'
-              f"- Bereitstellung: **{'erfolgreich' if successful else 'fehlgeschlagen'}**\n"
-              f"- Apple-Anmeldung: **{'verbunden und geprüft' if successful else 'nicht bestätigt'}**\n"
+              f"- Bereitstellung: **{'erfolgreich' if success else 'fehlgeschlagen'}**\n"
+              f"- Apple-Anmeldung: **{'verbunden und geprüft' if success else 'nicht bestätigt'}**\n"
               f"- Stand: `{os.environ['SHA']}`\n"
               f"- Ausführung: {os.environ['RUN_URL']}\n"
               '- Adresse: https://citybeach.smarbiz.sbs\n'
