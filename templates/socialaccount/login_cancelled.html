@@ -1,0 +1,10 @@
+{% extends 'cards/base.html' %}
+{% block title %}Apple-Anmeldung abgebrochen · CityBeach Frankfurt{% endblock %}
+{% block content %}
+<section class="panel social-error">
+  <span class="eyebrow">APPLE-ANMELDUNG</span>
+  <h1>Die Anmeldung wurde abgebrochen.</h1>
+  <p>Du kannst die Apple-Anmeldung erneut starten oder dich mit deiner E-Mail-Adresse anmelden.</p>
+  <div class="button-row"><a class="primary" href="{% url 'login' %}">Zur Anmeldung</a><a class="secondary" href="{% url 'landing' %}">Zur Startseite</a></div>
+</section>
+{% endblock %}
