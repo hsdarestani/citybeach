@@ -1,4 +1,4 @@
-name: Test and Deploy CityBeach
+name: CityBeach testen und bereitstellen
 
 on:
   pull_request:
@@ -18,20 +18,21 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
-      - run: pip install -r requirements.txt
-      - name: Migration check
+      - name: Abhängigkeiten installieren
+        run: pip install -r requirements.txt
+      - name: Migrationen prüfen
         env:
           DJANGO_DEBUG: '1'
           DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
         run: |
           python manage.py makemigrations --check --dry-run
           python manage.py migrate --noinput
-      - name: Tests
+      - name: Automatische Prüfungen ausführen
         env:
           DJANGO_DEBUG: '1'
           DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
         run: python manage.py test -v 2
-      - name: Static files
+      - name: Statische Dateien sammeln
         env:
           DJANGO_DEBUG: '1'
           DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
@@ -43,21 +44,26 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Install SSH client
+      - name: SSH-Werkzeug installieren
         run: sudo apt-get update && sudo apt-get install -y sshpass
 
-      - name: Deploy to Hetzner
+      - name: Auf Hetzner bereitstellen
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
           DOMAIN: citybeach.smarbiz.sbs
+          APPLE_SERVICE_ID: ${{ secrets.APPLE_SERVICE_ID }}
+          APPLE_BUNDLE_ID: ${{ secrets.APPLE_BUNDLE_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PRIVATE_KEY_B64: ${{ secrets.APPLE_PRIVATE_KEY_B64 }}
         run: |
           test -n "$HOST" && test -n "$PASS"
           sshpass -p "$PASS" ssh \
             -o ConnectTimeout=15 \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
-            root@"$HOST" "CITY_HOST='$HOST' CITY_DOMAIN='$DOMAIN' bash -s" <<'REMOTE'
+            root@"$HOST" "CITY_HOST='$HOST' CITY_DOMAIN='$DOMAIN' APPLE_SERVICE_ID='$APPLE_SERVICE_ID' APPLE_BUNDLE_ID='$APPLE_BUNDLE_ID' APPLE_KEY_ID='$APPLE_KEY_ID' APPLE_TEAM_ID='$APPLE_TEAM_ID' APPLE_PRIVATE_KEY_B64='$APPLE_PRIVATE_KEY_B64' bash -s" <<'REMOTE'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
 
@@ -109,6 +115,11 @@ jobs:
 
           set_env DJANGO_ALLOWED_HOSTS "$CITY_DOMAIN,$CITY_HOST,127.0.0.1,localhost"
           set_env DJANGO_CSRF_TRUSTED_ORIGINS "https://$CITY_DOMAIN,http://$CITY_HOST"
+          set_env APPLE_SERVICE_ID "$APPLE_SERVICE_ID"
+          set_env APPLE_BUNDLE_ID "$APPLE_BUNDLE_ID"
+          set_env APPLE_KEY_ID "$APPLE_KEY_ID"
+          set_env APPLE_TEAM_ID "$APPLE_TEAM_ID"
+          set_env APPLE_PRIVATE_KEY_B64 "$APPLE_PRIVATE_KEY_B64"
 
           docker compose up -d --build --remove-orphans
           docker compose exec -T web python manage.py seed_demo
@@ -117,12 +128,12 @@ jobs:
           . "$ENV_FILE"
           set +a
           printf '%s\n' \
-            "CityBeach Frankfurt Demo" \
-            "URL: https://$CITY_DOMAIN" \
-            "Fallback: http://$CITY_HOST" \
-            "owner / $CITYBEACH_OWNER_PASSWORD" \
-            "staff / $CITYBEACH_STAFF_PASSWORD" \
-            "customer / $CITYBEACH_CUSTOMER_PASSWORD" > "$APP_DIR/.initial-credentials"
+            "CityBeach Frankfurt – Demozugänge" \
+            "Adresse: https://$CITY_DOMAIN" \
+            "Ersatzadresse: http://$CITY_HOST" \
+            "Inhaber: owner / $CITYBEACH_OWNER_PASSWORD" \
+            "Mitarbeiter: staff / $CITYBEACH_STAFF_PASSWORD" \
+            "Kunde: customer / $CITYBEACH_CUSTOMER_PASSWORD" > "$APP_DIR/.initial-credentials"
           chmod 600 "$APP_DIR/.initial-credentials"
 
           if [ ! -f "/etc/letsencrypt/live/$CITY_DOMAIN/fullchain.pem" ]; then
@@ -156,7 +167,7 @@ jobs:
           curl -fsS http://127.0.0.1:8022/health/
           REMOTE
 
-      - name: Report deployment result
+      - name: Ergebnis melden
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -164,7 +175,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
-          BODY="CityBeach production deployment: **${JOB_STATUS}**%0A%0ACommit: \`${SHA}\`%0ARun: ${RUN_URL}%0ADomain: https://citybeach.smarbiz.sbs%0AFallback: http://91.107.155.215"
+          BODY="CityBeach-Bereitstellung: **${JOB_STATUS}**%0A%0AStand: \`${SHA}\`%0AAusführung: ${RUN_URL}%0ADomain: https://citybeach.smarbiz.sbs%0AErsatzadresse: http://91.107.155.215"
           curl -fsS -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
