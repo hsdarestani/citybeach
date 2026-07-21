@@ -22,23 +22,25 @@ jobs:
           APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
           APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_REDIRECT_URI_INPUT: ${{ secrets.APPLE_REDIRECT_URI }}
           APPLE_PRIVATE_KEY_INPUT: ${{ secrets.APPLE_PRIVATE_KEY_BASE64 }}
         run: |
           set -euo pipefail
           test -n "$HOST" && test -n "$PASS"
           test -n "$APPLE_CLIENT_ID" && test -n "$APPLE_KEY_ID" && test -n "$APPLE_TEAM_ID"
-          test -n "$APPLE_REDIRECT_URI_INPUT" && test -n "$APPLE_PRIVATE_KEY_INPUT"
-          REDIRECT="${APPLE_REDIRECT_URI_INPUT%/}/"
-          test "$REDIRECT" = 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'
+          test -n "$APPLE_PRIVATE_KEY_INPUT"
+          REDIRECT='https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'
 
-          if printf '%s' "$APPLE_PRIVATE_KEY_INPUT" | grep -q 'BEGIN PRIVATE KEY'; then
-            KEY_B64="$(printf '%s' "$APPLE_PRIVATE_KEY_INPUT" | base64 -w 0)"
-            echo 'KEY_FORMAT=raw-pem'
-          else
-            KEY_B64="$(printf '%s' "$APPLE_PRIVATE_KEY_INPUT" | tr -d '[:space:]')"
-            echo 'KEY_FORMAT=base64'
-          fi
+          case "$APPLE_PRIVATE_KEY_INPUT" in
+            *'BEGIN PRIVATE KEY'*)
+              KEY_B64="$(printf '%s' "$APPLE_PRIVATE_KEY_INPUT" | base64 -w 0)"
+              echo 'KEY_FORMAT=raw-pem'
+              ;;
+            *)
+              KEY_B64="$(printf '%s' "$APPLE_PRIVATE_KEY_INPUT" | tr -d '[:space:]')"
+              echo 'KEY_FORMAT=base64'
+              ;;
+          esac
+          test -n "$KEY_B64"
 
           sshpass -p "$PASS" ssh \
             -o ConnectTimeout=15 \
@@ -86,13 +88,13 @@ jobs:
           echo 'STAGE_5_DJANGO_OK'
           REMOTE
 
-      - name: Redirect عمومی را بررسی کن
+      - name: Öffentliche Apple-Weiterleitung prüfen
         env:
           APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
-          APPLE_REDIRECT_URI: ${{ secrets.APPLE_REDIRECT_URI }}
         run: |
           python3 - <<'PY'
           import os, urllib.error, urllib.parse, urllib.request
+          expected_redirect = 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'
           html = urllib.request.urlopen('https://citybeach.smarbiz.sbs/accounts/login/', timeout=30).read().decode(errors='replace')
           assert 'Mit Apple fortfahren' in html
           class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -108,8 +110,8 @@ jobs:
           query = urllib.parse.parse_qs(parsed.query)
           print('APPLE_HOST', parsed.netloc)
           print('CLIENT_ID_OK', query.get('client_id', [''])[0] == os.environ['APPLE_CLIENT_ID'])
-          print('REDIRECT_URI_OK', query.get('redirect_uri', [''])[0] == os.environ['APPLE_REDIRECT_URI'].rstrip('/') + '/')
+          print('REDIRECT_URI_OK', query.get('redirect_uri', [''])[0] == expected_redirect)
           assert parsed.netloc == 'appleid.apple.com'
           assert query.get('client_id', [''])[0] == os.environ['APPLE_CLIENT_ID']
-          assert query.get('redirect_uri', [''])[0] == os.environ['APPLE_REDIRECT_URI'].rstrip('/') + '/'
+          assert query.get('redirect_uri', [''])[0] == expected_redirect
           PY
