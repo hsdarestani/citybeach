@@ -127,22 +127,10 @@ SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 SOCIALACCOUNT_LOGIN_ON_GET = True
 SOCIALACCOUNT_ADAPTER = 'cards.adapters.CityBeachSocialAccountAdapter'
 
-SOCIALACCOUNT_PROVIDERS = {}
-if APPLE_LOGIN_ENABLED:
-    apple_apps = [{
-        'client_id': APPLE_CLIENT_ID,
-        'secret': APPLE_KEY_ID,
-        'key': APPLE_TEAM_ID,
-        'settings': {'certificate_key': APPLE_PRIVATE_KEY},
-    }]
-    if APPLE_BUNDLE_ID:
-        apple_apps.append({
-            'client_id': APPLE_BUNDLE_ID,
-            'secret': APPLE_KEY_ID,
-            'key': APPLE_TEAM_ID,
-            'settings': {'certificate_key': APPLE_PRIVATE_KEY, 'hidden': True},
-        })
-    SOCIALACCOUNT_PROVIDERS = {'apple': {'APPS': apple_apps}}
+# Die konkrete Apple-Anwendung wird durch `seed_demo` als SocialApp in der
+# Datenbank angelegt und mit SITE_ID=1 verbunden. Dadurch verwendet allauth
+# genau eine eindeutige Konfiguration und es entstehen keine doppelten Apps.
+SOCIALACCOUNT_PROVIDERS = {'apple': {}}
 
 SESSION_COOKIE_SECURE = os.getenv('DJANGO_SECURE_COOKIES', '0') == '1'
 CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
