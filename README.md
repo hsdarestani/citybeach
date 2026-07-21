@@ -13,7 +13,7 @@ Eine hochwertige, für iOS und Android vorbereitete Web-Anwendung für **CityBea
 - Digitale Belege und Buchungsverlauf
 - Bereichsspezifische Angebote, Veranstaltungskarten und Bildhochladen
 - Sofortige Zahlungsmitteilungen für den Inhaber
-- Verknüpfungen zu sozialen Netzwerken, Internetseiten und Reservierungen
+- Verknüpfungen zu sozialen Netzwerken und Internetseiten
 - Programmierschnittstelle und Endgeräte-Registrierung für zukünftige iOS- und Android-Anwendungen
 - Installierbare Web-Anwendung mit für Mobilgeräte optimierter Oberfläche
 
@@ -52,16 +52,18 @@ https://citybeach.smarbiz.sbs
 
 ## Apple-Anmeldung
 
-Für die echte Apple-Anmeldung müssen zusätzlich diese GitHub-Geheimnisse hinterlegt werden:
+Für die Apple-Anmeldung werden diese GitHub-Geheimnisse verwendet:
 
-- `APPLE_SERVICE_ID`
-- `APPLE_BUNDLE_ID` – optional für die spätere iOS-Anwendung
+- `APPLE_CLIENT_ID`
 - `APPLE_KEY_ID`
-- `APPLE_TEAM_ID` – bei abweichender Kennung den App-ID-Präfix verwenden
-- `APPLE_PRIVATE_KEY_B64` – der Inhalt der von Apple geladenen `.p8`-Datei als einzeilige Base64-Zeichenfolge
+- `APPLE_TEAM_ID`
+- `APPLE_PRIVATE_KEY_BASE64` – akzeptiert den vollständigen `.p8`-Inhalt, Base64 des vollständigen Inhalts oder nur den Schlüsselblock
+- `APPLE_REDIRECT_URI`
 
-Die bei Apple einzutragende Rücksprungadresse lautet:
+Die Rücksprungadresse muss exakt lauten:
 
 ```text
 https://citybeach.smarbiz.sbs/accounts/apple/login/callback/
 ```
+
+Bei jeder Produktionsbereitstellung werden die interne Apple-Konfiguration, die sichtbare Schaltfläche „Mit Apple fortfahren“ und die Weiterleitung zu `appleid.apple.com` automatisch geprüft.
