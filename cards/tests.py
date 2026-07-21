@@ -21,9 +21,9 @@ class GermanInterfaceTests(TestCase):
         response = self.client.get(reverse('landing'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'DEIN SOMMER')
-        self.assertContains(response, 'ANGEBOTE &amp; VERANSTALTUNGEN')
+        self.assertContains(response, 'ANGEBOTE & VERANSTALTUNGEN')
         self.assertNotContains(response, 'CHOOSE YOUR VIBE')
-        self.assertNotContains(response, 'OFFERS &amp; EVENTS')
+        self.assertNotContains(response, 'OFFERS & EVENTS')
 
 
 class RegistrationAgeTests(TestCase):
