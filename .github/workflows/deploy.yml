@@ -100,20 +100,39 @@ jobs:
           import base64
           import os
           import sys
+          import textwrap
 
           value = os.environ.get('APPLE_PRIVATE_KEY_INPUT', '').strip().replace('\\n', '\n')
+          if not value:
+              sys.exit('Der Apple-Schlüssel ist leer.')
+
           if '-----BEGIN PRIVATE KEY-----' in value:
-              private_key = value.encode()
+              pem = value.strip() + '\n'
           else:
+              compact = ''.join(value.split())
               try:
-                  private_key = base64.b64decode(''.join(value.split()), validate=True)
+                  decoded = base64.b64decode(compact, validate=True)
               except Exception:
-                  sys.exit('APPLE_PRIVATE_KEY_BASE64 ist weder ein gültiger .p8-Inhalt noch gültiges Base64.')
-          if b'-----BEGIN PRIVATE KEY-----' not in private_key or b'-----END PRIVATE KEY-----' not in private_key:
-              sys.exit('Der Apple-Schlüssel enthält keinen gültigen privaten Schlüssel.')
-          print(base64.b64encode(private_key).decode())
+                  sys.exit('Der Apple-Schlüssel hat kein unterstütztes Format.')
+
+              if b'-----BEGIN PRIVATE KEY-----' in decoded:
+                  pem = decoded.decode('utf-8').strip() + '\n'
+              elif decoded.startswith(b'0'):
+                  pem = (
+                      '-----BEGIN PRIVATE KEY-----\n'
+                      + '\n'.join(textwrap.wrap(compact, 64))
+                      + '\n-----END PRIVATE KEY-----\n'
+                  )
+              else:
+                  sys.exit('Der Apple-Schlüssel ist kein gültiger PKCS#8-Schlüssel.')
+
+          print(base64.b64encode(pem.encode()).decode())
           PY
           )"
+
+          printf '%s' "$APPLE_PRIVATE_KEY_CANONICAL" | base64 --decode > /tmp/citybeach-apple-key.p8
+          openssl pkey -in /tmp/citybeach-apple-key.p8 -noout >/dev/null
+          rm -f /tmp/citybeach-apple-key.p8
 
           echo "APPLE_PRIVATE_KEY_CANONICAL=$APPLE_PRIVATE_KEY_CANONICAL" >> "$GITHUB_ENV"
           echo "APPLE_REDIRECT_URI_NORMALIZED=$NORMALIZED_REDIRECT" >> "$GITHUB_ENV"
