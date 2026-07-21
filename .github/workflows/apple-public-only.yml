@@ -1,0 +1,66 @@
+name: Apple-Weiterleitung öffentlich prüfen
+
+on:
+  pull_request:
+
+jobs:
+  public-check:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: CityBeach und Apple-Parameter prüfen
+        env:
+          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          expected_redirect = 'https://citybeach.smarbiz.sbs/accounts/apple/login/callback/'
+          expected_client = os.environ['APPLE_CLIENT_ID']
+
+          for attempt in range(12):
+              try:
+                  html = urllib.request.urlopen(
+                      'https://citybeach.smarbiz.sbs/accounts/login/', timeout=30
+                  ).read().decode(errors='replace')
+                  assert 'Mit Apple fortfahren' in html
+                  break
+              except Exception:
+                  if attempt == 11:
+                      raise
+                  time.sleep(10)
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect)
+          request = urllib.request.Request(
+              'https://citybeach.smarbiz.sbs/accounts/apple/login/',
+              headers={'User-Agent': 'CityBeach Apple Public Check'},
+          )
+          try:
+              response = opener.open(request, timeout=30)
+              location = response.headers.get('Location', '')
+          except urllib.error.HTTPError as exc:
+              if exc.code not in (301, 302, 303, 307, 308):
+                  raise
+              location = exc.headers.get('Location', '')
+
+          parsed = urllib.parse.urlparse(location)
+          query = urllib.parse.parse_qs(parsed.query)
+          print('APPLE_DOMAIN_OK=', parsed.netloc == 'appleid.apple.com')
+          print('CLIENT_ID_OK=', query.get('client_id', [''])[0] == expected_client)
+          print('REDIRECT_URI_OK=', query.get('redirect_uri', [''])[0] == expected_redirect)
+          assert parsed.scheme == 'https'
+          assert parsed.netloc == 'appleid.apple.com'
+          assert parsed.path.startswith('/auth/authorize')
+          assert query.get('client_id', [''])[0] == expected_client
+          assert query.get('redirect_uri', [''])[0] == expected_redirect
+          print('CITYBEACH_APPLE_PUBLIC_OK=1')
+          PY
